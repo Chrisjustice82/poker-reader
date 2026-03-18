@@ -7,39 +7,29 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Poker Reader">
-<meta name="application-name" content="Poker Reader">
 <meta name="theme-color" content="#060d18">
-<meta name="description" content="Texas Hold'em hand reading trainer">
 <title>Poker Hand Reader</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html { height: 100%; overscroll-behavior: none; }
-  body {
-    margin: 0; padding: 0;
-    background: #060d18;
-    font-family: Georgia, 'Times New Roman', serif;
-    height: 100%;
-    overflow-x: hidden;
-    overscroll-behavior: none;
-    -webkit-font-smoothing: antialiased;
-  }
-  #root { min-height: 100vh; min-height: 100dvh; }
-  button { font-family: Georgia, serif; touch-action: manipulation; cursor: pointer; }
-  input[type=range] { touch-action: pan-x; -webkit-appearance: none; height: 28px; }
-  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; background: #ffd700; border: 2px solid #aa8800; }
-  input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: rgba(255,215,0,0.25); }
-  ::-webkit-scrollbar { width: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,215,0,0.3); border-radius: 2px; }
-</style>
-
 <link rel="manifest" href="./manifest.json">
+<style>
+  *,*::before,*::after{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#060d18;
+    font-family:Georgia,'Times New Roman',serif;overscroll-behavior:none;
+    -webkit-font-smoothing:antialiased;}
+  #root{height:100dvh;display:flex;flex-direction:column;}
+  button{font-family:Georgia,serif;touch-action:manipulation;cursor:pointer;border:none;outline:none;}
+  input[type=range]{touch-action:pan-x;-webkit-appearance:none;height:32px;background:transparent;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:32px;height:32px;border-radius:50%;
+    background:#ffd700;border:3px solid #aa8800;margin-top:-13px;}
+  input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:rgba(255,215,0,0.2);}
+  ::-webkit-scrollbar{width:3px;}
+  ::-webkit-scrollbar-thumb{background:rgba(255,215,0,0.25);border-radius:2px;}
+</style>
 <script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
+  if('serviceWorker' in navigator){
+    window.addEventListener('load',()=>{
       navigator.serviceWorker.register('./sw.js')
-        .then(r => console.log('[PWA] SW registered, scope:', r.scope))
-        .catch(e => console.warn('[PWA] SW failed:', e.message));
+        .then(r=>console.log('[SW] registered'))
+        .catch(e=>console.warn('[SW] failed:',e.message));
     });
   }
 </script>
@@ -50,569 +40,583 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
+const {useState,useEffect,useRef} = React;
 
-// ─── CONSTANTS ───────────────────────────────────────────────────────────────
-const SUITS = ["♠","♥","♦","♣"];
-const RANKS = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
-const RV = {"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,"J":11,"Q":12,"K":13,"A":14};
-// Position indices: 0=SB,1=BB,2=UTG,3=UTG+1,4=Middle,5=Hijack,6=Cutoff,7=Button
-const POS_NAMES = ["Small Blind","Big Blind","UTG","UTG+1","Middle","Hijack","Cutoff","Button"];
-const POS_SHORT = ["SB","BB","UTG","UTG+1","MID","HJ","CO","BTN"];
+// ═══════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+const SUITS=["♠","♥","♦","♣"];
+const RANKS=["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
+const RV={"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"10":10,"J":11,"Q":12,"K":13,"A":14};
+const POS_NAMES=["Small Blind","Big Blind","UTG","UTG+1","Middle","Hijack","Cutoff","Button"];
+const POS_SHORT=["SB","BB","UTG","UTG+1","MID","HJ","CO","BTN"];
 
-// ─── DECK ─────────────────────────────────────────────────────────────────────
-function makeDeck() {
-  const d = [];
-  for (const s of SUITS) for (const r of RANKS) d.push({rank:r,suit:s});
-  return d;
-}
-function shuffle(a) {
-  const arr = [...a];
-  for (let i = arr.length-1; i > 0; i--) {
-    const j = Math.floor(Math.random()*(i+1));
-    [arr[i],arr[j]] = [arr[j],arr[i]];
-  }
-  return arr;
-}
+// Hand range categories for assessment (what the player guesses)
+const HAND_RANGES = [
+  {id:"premium_pair",  label:"Premium Pair",   desc:"AA / KK / QQ",        emoji:"👑"},
+  {id:"medium_pair",   label:"Medium Pair",    desc:"JJ–77",               emoji:"🎯"},
+  {id:"small_pair",    label:"Small Pair",     desc:"66–22",               emoji:"🎲"},
+  {id:"broadway_pair", label:"Broadway Pair",  desc:"Paired J/Q/K/A kicker",emoji:"🃏"},
+  {id:"AK_AQ",         label:"AK / AQ",        desc:"Big slick or big chick",emoji:"⚡"},
+  {id:"broadway_suited",label:"Broadway Suited",desc:"KQs, QJs, JTs etc",  emoji:"♦️"},
+  {id:"broadway_off",  label:"Broadway Offsuit",desc:"KQ, KJ, QJ offsuit", emoji:"♠️"},
+  {id:"suited_conn",   label:"Suited Connectors",desc:"98s, 87s, 76s etc", emoji:"🔗"},
+  {id:"suited_ace",    label:"Suited Ace",     desc:"Axs — any suited ace", emoji:"🅰️"},
+  {id:"weak_ace",      label:"Weak Ace",       desc:"Axo — offsuit weak ace",emoji:"🂡"},
+  {id:"trash",         label:"Trash / Bluff",  desc:"Junk or pure bluff",   emoji:"🗑️"},
+];
 
-// ─── HAND EVALUATION ─────────────────────────────────────────────────────────
-function cv(c) { return RV[c.rank]; }
-function getCombos(arr,k) {
-  if (k===0) return [[]]; if (arr.length<k) return [];
-  const [f,...r] = arr;
-  return [...getCombos(r,k-1).map(c=>[f,...c]),...getCombos(r,k)];
-}
-function evaluateHand(cards) {
-  const combos = cards.length >= 5 ? getCombos(cards,5) : [cards];
-  let best = null;
-  for (const c of combos) {
-    const s = score5(c);
-    if (!best || s.rank > best.rank || (s.rank===best.rank && s.tb>best.tb)) best={...s,best5:c};
-  }
-  return best;
-}
-function score5(cards) {
-  const vals = cards.map(cv).sort((a,b)=>b-a);
-  const suits = cards.map(c=>c.suit);
-  const flush = suits.every(s=>s===suits[0]);
-  const straight = isStraight(vals);
-  const counts = {}; for (const v of vals) counts[v]=(counts[v]||0)+1;
-  const groups = Object.entries(counts).sort((a,b)=>b[1]-a[1]||b[0]-a[0]);
-  const tb = vals[0]*1e8+vals[1]*1e6+vals[2]*1e4+vals[3]*100+vals[4];
-  if (flush&&straight) { const royal=vals[0]===14&&vals[4]===10; return {rank:royal?9:8,name:royal?"Royal Flush":"Straight Flush",tb}; }
-  if (groups[0][1]===4) return {rank:7,name:"Four of a Kind",tb};
-  if (groups[0][1]===3&&groups[1]?.[1]===2) return {rank:6,name:"Full House",tb};
-  if (flush) return {rank:5,name:"Flush",tb};
-  if (straight) return {rank:4,name:"Straight",tb};
-  if (groups[0][1]===3) return {rank:3,name:"Three of a Kind",tb};
-  if (groups[0][1]===2&&groups[1]?.[1]===2) return {rank:2,name:"Two Pair",tb};
-  if (groups[0][1]===2) return {rank:1,name:"One Pair",tb};
-  return {rank:0,name:"High Card",tb};
-}
-function isStraight(vals) {
-  const s=[...vals].sort((a,b)=>b-a);
-  if (s[0]-s[4]===4&&new Set(s).size===5) return true;
-  if (s[0]===14&&s[1]===5&&s[2]===4&&s[3]===3&&s[4]===2) return true;
-  return false;
-}
-function handCategory(hole,community) {
-  const all=[...hole,...community];
-  if (all.length<2) return "Unknown";
-  return evaluateHand(all).name;
-}
-
-// ─── POSITION-AWARE AI ───────────────────────────────────────────────────────
-// Based on detailed low-stakes live player profiles per position
-
-// Hand classification helpers
-function isPair(h) { return cv(h[0])===cv(h[1]); }
-function isAce(h) { return cv(h[0])===14||cv(h[1])===14; }
-function highCard(h) { return Math.max(cv(h[0]),cv(h[1])); }
-function lowCard(h) { return Math.min(cv(h[0]),cv(h[1])); }
-function isSuited(h) { return h[0].suit===h[1].suit; }
-function isBroadway(h) { return lowCard(h)>=10; }
-function isConnected(h) { const g=highCard(h)-lowCard(h); return g<=2; }
-function pairRank(h) { return isPair(h)?cv(h[0]):0; }
-
-// Preflop hand strength category (used for position-specific ranges)
-// Returns: "premium"|"strong"|"medium"|"speculative"|"trash"
-function preflopCategory(hole) {
-  const hi=highCard(hole), lo=lowCard(hole);
-  const pair=isPair(hole), suited=isSuited(hole), gap=hi-lo;
-  if (pair && hi>=11) return "premium";        // JJ+
-  if (pair && hi>=8)  return "strong";          // 88-TT
-  if (pair)           return "medium";          // 22-77
-  if (hi===14 && lo>=11) return "premium";     // AK, AQ, AJ
-  if (hi===14 && lo>=10) return "strong";      // AT
-  if (hi===14 && (suited||lo>=7)) return "medium"; // Axs, AJ off
-  if (isBroadway(hole) && suited) return "strong";  // KQs, QJs etc
-  if (isBroadway(hole)) return "medium";        // KQ off, KJ etc
-  if (hi>=11 && suited && gap<=2) return "medium"; // JTs, T9s
-  if (hi>=9 && suited && gap<=2) return "speculative"; // 98s, 87s
-  if (pair) return "medium";
-  if (hi===14) return "speculative";            // Axo weak
+// Map actual hole cards → range id
+function classifyHoleCards(h) {
+  const v1=RV[h[0].rank],v2=RV[h[1].rank];
+  const hi=Math.max(v1,v2),lo=Math.min(v1,v2);
+  const pair=v1===v2, suited=h[0].suit===h[1].suit;
+  if(pair&&hi>=12) return "premium_pair";
+  if(pair&&hi>=7)  return "medium_pair";
+  if(pair)         return "small_pair";
+  if(hi===14&&lo>=12) return "AK_AQ";
+  if(hi===14&&suited) return "suited_ace";
+  if(hi===14)         return "weak_ace";
+  if(lo>=10&&suited)  return "broadway_suited";
+  if(lo>=10)          return "broadway_off";
+  if(hi>=9&&suited&&(hi-lo)<=2) return "suited_conn";
+  if(lo>=10&&hi>=10)  return "broadway_pair"; // paired broadway
   return "trash";
 }
 
-// Post-flop strength 0-1 with draw equity
-function postFlopStr(hole, community) {
-  const ev = evaluateHand([...hole,...community]);
-  const base = [0.05,0.22,0.38,0.54,0.66,0.74,0.84,0.91,0.96,1.0][ev.rank]||0.05;
-  // Draw bonuses
-  const all = [...hole,...community];
-  const sc = {}; for (const c of all) sc[c.suit]=(sc[c.suit]||0)+1;
-  const flushDraw = Object.values(sc).some(n=>n===4);
-  const allV = [...new Set(all.map(cv))].sort((a,b)=>a-b);
-  let oesd = false;
-  for (let i=0;i<allV.length-3;i++) if (allV[i+3]-allV[i]===3){oesd=true;break;}
-  return Math.min(1, base + (flushDraw?0.13:0) + (oesd?0.09:0));
+// Generate 3 options: 1 correct + 2 plausible distractors
+function genRangeOptions(correctId) {
+  const adjacency = {
+    premium_pair:  ["medium_pair","AK_AQ"],
+    medium_pair:   ["premium_pair","small_pair"],
+    small_pair:    ["medium_pair","suited_conn"],
+    broadway_pair: ["AK_AQ","broadway_off"],
+    AK_AQ:         ["premium_pair","broadway_suited"],
+    broadway_suited:["AK_AQ","suited_conn"],
+    broadway_off:  ["broadway_suited","weak_ace"],
+    suited_conn:   ["broadway_suited","small_pair"],
+    suited_ace:    ["AK_AQ","weak_ace"],
+    weak_ace:      ["suited_ace","broadway_off"],
+    trash:         ["suited_conn","weak_ace"],
+  };
+  const wrongs = adjacency[correctId] || HAND_RANGES.filter(r=>r.id!==correctId).slice(0,2).map(r=>r.id);
+  return shuffle([correctId, wrongs[0], wrongs[1]]).map(id=>HAND_RANGES.find(r=>r.id===id));
 }
 
-function potOdds(toCall, pot) {
-  if (toCall<=0) return 0;
-  return toCall/(pot+toCall);
+// ═══════════════════════════════════════════════════════════════
+// DECK
+// ═══════════════════════════════════════════════════════════════
+function makeDeck(){const d=[];for(const s of SUITS)for(const r of RANKS)d.push({rank:r,suit:s});return d;}
+function shuffle(a){const arr=[...a];for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+
+// ═══════════════════════════════════════════════════════════════
+// HAND EVALUATION
+// ═══════════════════════════════════════════════════════════════
+function cv(c){return RV[c.rank];}
+function getCombos(arr,k){if(k===0)return[[]];if(arr.length<k)return[];const[f,...r]=arr;return[...getCombos(r,k-1).map(c=>[f,...c]),...getCombos(r,k)];}
+function evaluateHand(cards){
+  const combos=cards.length>=5?getCombos(cards,5):[cards];
+  let best=null;
+  for(const c of combos){const s=score5(c);if(!best||s.rank>best.rank||(s.rank===best.rank&&s.tb>best.tb))best={...s,best5:c};}
+  return best;
+}
+function score5(cards){
+  const vals=cards.map(cv).sort((a,b)=>b-a);
+  const suits=cards.map(c=>c.suit);
+  const flush=suits.every(s=>s===suits[0]);
+  const straight=isStraight(vals);
+  const counts={};for(const v of vals)counts[v]=(counts[v]||0)+1;
+  const groups=Object.entries(counts).sort((a,b)=>b[1]-a[1]||b[0]-a[0]);
+  const tb=vals[0]*1e8+vals[1]*1e6+vals[2]*1e4+vals[3]*100+vals[4];
+  if(flush&&straight){const royal=vals[0]===14&&vals[4]===10;return{rank:royal?9:8,name:royal?"Royal Flush":"Straight Flush",tb};}
+  if(groups[0][1]===4)return{rank:7,name:"Four of a Kind",tb};
+  if(groups[0][1]===3&&groups[1]?.[1]===2)return{rank:6,name:"Full House",tb};
+  if(flush)return{rank:5,name:"Flush",tb};
+  if(straight)return{rank:4,name:"Straight",tb};
+  if(groups[0][1]===3)return{rank:3,name:"Three of a Kind",tb};
+  if(groups[0][1]===2&&groups[1]?.[1]===2)return{rank:2,name:"Two Pair",tb};
+  if(groups[0][1]===2)return{rank:1,name:"One Pair",tb};
+  return{rank:0,name:"High Card",tb};
+}
+function isStraight(vals){
+  const s=[...vals].sort((a,b)=>b-a);
+  if(s[0]-s[4]===4&&new Set(s).size===5)return true;
+  if(s[0]===14&&s[1]===5&&s[2]===4&&s[3]===3&&s[4]===2)return true;
+  return false;
+}
+function handCategory(hole,community){
+  const all=[...hole,...community];
+  if(all.length<2)return"Unknown";
+  return evaluateHand(all).name;
 }
 
-// ─── POSITION-SPECIFIC DECISION ENGINE ───────────────────────────────────────
-// posIdx: 0=SB,1=BB,2=UTG,3=UTG+1,4=MID,5=HJ,6=CO,7=BTN
-function aiDecide(posIdx, hole, community, pot, toCall, myChips, stage, numActive) {
-  const cat = preflopCategory(hole);
-  const isPreflop = stage==="preflop";
-  const spr = pot>0 ? myChips/pot : 12;
-  const deep = spr>6;
+// ═══════════════════════════════════════════════════════════════
+// AI — HAND HELPERS
+// ═══════════════════════════════════════════════════════════════
+function isPair(h){return cv(h[0])===cv(h[1]);}
+function isAce(h){return cv(h[0])===14||cv(h[1])===14;}
+function hi(h){return Math.max(cv(h[0]),cv(h[1]));}
+function lo(h){return Math.min(cv(h[0]),cv(h[1]));}
+function isSuited(h){return h[0].suit===h[1].suit;}
+function isBroadway(h){return lo(h)>=10;}
+function isConnected(h){return hi(h)-lo(h)<=2;}
 
-  // ── PREFLOP ──
-  if (isPreflop) {
-    const facingRaise = toCall > 2;
-
-    // Big Blind defense (pos 1)
-    if (posIdx===1) {
-      if (!facingRaise) return {action:"check"}; // already in, free play
-      if (cat==="premium") return {action:"raise", amount:Math.min(toCall*3,myChips)};
-      if (cat==="strong"||cat==="medium") return {action:"call"};
-      if (cat==="speculative"&&deep) return {action:"call"};
-      // BB defends very wide vs single raise — even marginal hands
-      if (toCall<=6&&Math.random()<0.55) return {action:"call"};
-      return {action:"fold"};
-    }
-
-    // Small Blind (pos 0)
-    if (posIdx===0) {
-      if (!facingRaise) {
-        if (cat==="premium") return {action:"raise",amount:6};
-        if (cat==="strong") return {action:"raise",amount:5};
-        if (cat==="medium"||cat==="speculative") return {action:"call"};
-        return {action:"fold"};
-      }
-      if (cat==="premium") return {action:"raise",amount:Math.min(toCall*3,myChips)};
-      if (cat==="strong") return {action:"call"};
-      if (cat==="medium"&&Math.random()<0.5) return {action:"call"};
-      return {action:"fold"};
-    }
-
-    // UTG / UTG+1 (pos 2,3) — tight range
-    if (posIdx===2||posIdx===3) {
-      if (!facingRaise) {
-        if (cat==="premium") return {action:"raise",amount:6};
-        if (cat==="strong") return {action:"raise",amount:6};
-        // Live leak: limp with medium and spec hands
-        if (cat==="medium"&&Math.random()<0.55) return {action:"call"};
-        if (cat==="speculative"&&isSuited(hole)&&Math.random()<0.3) return {action:"call"};
-        return {action:"fold"};
-      }
-      // Facing raise
-      if (cat==="premium") return {action:"raise",amount:Math.min(toCall*3,myChips)};
-      if (cat==="strong"&&Math.random()<0.4) return {action:"call"};
-      return {action:"fold"};
-    }
-
-    // Middle / Hijack (pos 4,5)
-    if (posIdx===4||posIdx===5) {
-      if (!facingRaise) {
-        if (cat==="premium"||cat==="strong") return {action:"raise",amount:6};
-        if (cat==="medium") return {action:Math.random()<0.5?"raise":"call",amount:6};
-        if (cat==="speculative"&&(isSuited(hole)||isConnected(hole))) return {action:"call"};
-        return {action:"fold"};
-      }
-      // Big leak: calls too much
-      if (cat==="premium") return {action:"raise",amount:Math.min(toCall*3,myChips)};
-      if (cat==="strong") return {action:"call"};
-      if (cat==="medium"&&Math.random()<0.55) return {action:"call"};
-      return {action:"fold"};
-    }
-
-    // Cutoff (pos 6) — wide opens, calls wide
-    if (posIdx===6) {
-      if (!facingRaise) {
-        if (cat==="trash"&&Math.random()<0.15) return {action:"fold"};
-        if (cat==="trash") return {action:"fold"};
-        if (cat==="speculative"&&Math.random()<0.5) return {action:"raise",amount:6};
-        return {action:"raise",amount:6};
-      }
-      if (cat==="premium") return {action:"raise",amount:Math.min(toCall*3.2,myChips)};
-      if (cat==="strong"||cat==="medium") return {action:"call"};
-      if (cat==="speculative"&&isSuited(hole)&&Math.random()<0.4) return {action:"call"};
-      return {action:"fold"};
-    }
-
-    // Button (pos 7) — very wide steals, floats
-    if (posIdx===7) {
-      if (!facingRaise) {
-        if (cat==="trash"&&highCard(hole)<7) return {action:"fold"};
-        if (cat==="trash"&&Math.random()<0.4) return {action:"fold"};
-        return {action:"raise",amount:6};
-      }
-      if (cat==="premium") return {action:"raise",amount:Math.min(toCall*3,myChips)};
-      if (cat==="strong"||cat==="medium") return {action:"call"};
-      if (isAce(hole)||isSuited(hole)) return {action:"call"};
-      if (Math.random()<0.35) return {action:"call"};
-      return {action:"fold"};
-    }
-  }
-
-  // ── POST-FLOP ──
-  const str = postFlopStr(hole, community);
-  const po = potOdds(toCall, pot);
-  const n = (Math.random()-0.5)*0.07;
-  const eff = Math.max(0,Math.min(1,str+n));
-
-  // Position-specific post-flop tendencies
-  const isEarly = posIdx<=3;
-  const isLate = posIdx>=6;
-
-  // --- Facing a bet ---
-  if (toCall > 0) {
-    // Strong hand: call or raise for value
-    if (eff >= 0.75) {
-      if (deep && Math.random()<(isLate?0.45:0.3)) {
-        return {action:"raise", amount:Math.min(Math.floor(toCall*2.7),myChips)};
-      }
-      return {action:"call"};
-    }
-    // Medium: call if pot odds justify, early position folds more
-    const callThresh = isEarly ? po+0.12 : (isLate ? po+0.04 : po+0.08);
-    if (eff > callThresh) {
-      // SB/BB special: call down passively with weak pairs/draws (big leak)
-      return {action:"call"};
-    }
-    // Semi-bluff raise (BTN/CO float)
-    if (eff > po && isLate && Math.random()<0.18) {
-      return {action:"raise", amount:Math.min(Math.floor(toCall*2.4),myChips)};
-    }
-    // BB calls down too wide
-    if (posIdx===1 && eff > 0.18 && Math.random()<0.5) return {action:"call"};
-    if (eff > po) return {action:"call"};
-    return {action:"fold"};
-  }
-
-  // --- No bet facing (first to act or checked to) ---
-  // UTG/UTG+1: honest — strong bet, weak check
-  if (isEarly) {
-    if (eff >= 0.65) {
-      const sz = Math.max(2, Math.floor(pot*(stage==="river"?0.75:0.60)));
-      return {action:"bet", amount:Math.min(sz,myChips)};
-    }
-    return {action:"check"};
-  }
-
-  // Middle: fit or fold — bet strong, check/give up weak
-  if (posIdx===4||posIdx===5) {
-    if (eff >= 0.58) {
-      const sz = Math.max(2,Math.floor(pot*0.62));
-      return {action:"bet",amount:Math.min(sz,myChips)};
-    }
-    if (eff >= 0.38 && stage==="flop" && Math.random()<0.40) {
-      return {action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.50)),myChips)};
-    }
-    return {action:"check"};
-  }
-
-  // CO: semi-aggressive, c-bets, occasional bluff
-  if (posIdx===6) {
-    if (eff >= 0.55) {
-      const sz = Math.max(2,Math.floor(pot*0.65));
-      return {action:"bet",amount:Math.min(sz,myChips)};
-    }
-    if (eff >= 0.32 && Math.random()<0.50) {
-      return {action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.52)),myChips)};
-    }
-    return {action:"check"};
-  }
-
-  // BTN: floats, bluffs, bets wide
-  if (posIdx===7) {
-    if (eff >= 0.50) {
-      const sz = Math.max(2,Math.floor(pot*0.68));
-      return {action:"bet",amount:Math.min(sz,myChips)};
-    }
-    if (Math.random()<0.40) {
-      return {action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.55)),myChips)};
-    }
-    return {action:"check"};
-  }
-
-  // SB: passive unless strong
-  if (posIdx===0) {
-    if (eff >= 0.68) {
-      const sz = Math.max(2,Math.floor(pot*0.65));
-      return {action:"bet",amount:Math.min(sz,myChips)};
-    }
-    return {action:"check"};
-  }
-
-  // BB: checks a lot, bets strong
-  if (posIdx===1) {
-    if (eff >= 0.62) {
-      const sz = Math.max(2,Math.floor(pot*0.62));
-      return {action:"bet",amount:Math.min(sz,myChips)};
-    }
-    return {action:"check"};
-  }
-
-  return {action:"check"};
+function preflopCat(hole){
+  const H=hi(hole),L=lo(hole),pair=isPair(hole),suited=isSuited(hole),gap=H-L;
+  if(pair&&H>=12)return"premium";
+  if(pair&&H>=8) return"strong";
+  if(pair)       return"medium";
+  if(H===14&&L>=12)return"premium";
+  if(H===14&&L>=10)return"strong";
+  if(H===14&&(suited||L>=7))return"medium";
+  if(isBroadway(hole)&&suited)return"strong";
+  if(isBroadway(hole))return"medium";
+  if(H>=11&&suited&&gap<=2)return"medium";
+  if(H>=9&&suited&&gap<=2)return"speculative";
+  if(H===14)return"speculative";
+  return"trash";
 }
 
-// ─── CHIP STACK ──────────────────────────────────────────────────────────────
-const CHIP_DEFS = [
+// ═══════════════════════════════════════════════════════════════
+// AI — POST-FLOP STRENGTH (0–1)
+// ═══════════════════════════════════════════════════════════════
+function postFlopStr(hole,community){
+  const ev=evaluateHand([...hole,...community]);
+  // made-hand base equity
+  const base=[0.06,0.24,0.40,0.56,0.68,0.76,0.85,0.92,0.97,1.0][ev.rank]||0.06;
+  // draw bonuses
+  const all=[...hole,...community];
+  const sc={};for(const c of all)sc[c.suit]=(sc[c.suit]||0)+1;
+  const flushDraw=Object.values(sc).some(n=>n===4);
+  const allV=[...new Set(all.map(cv))].sort((a,b)=>a-b);
+  let oesd=false;
+  for(let i=0;i<allV.length-3;i++)if(allV[i+3]-allV[i]===3){oesd=true;break;}
+  return Math.min(1,base+(flushDraw?0.14:0)+(oesd?0.10:0));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// AI — REALISTIC DECISION ENGINE
+// Represents live low/mid-stakes player tendencies per position.
+// Each player is one of: TAG, LAG, Calling Station, Nit, Rec, GTO-ish
+// ═══════════════════════════════════════════════════════════════
+const AI_PROFILES=[
+  {name:"Rocky", emoji:"🪨",style:"Tight-Aggressive", pfr:0.16,vpip:0.18,cbet:0.72,foldCbet:0.50,bluff:0.18,aggPost:0.62},
+  {name:"Maniac", emoji:"🔥",style:"Loose-Aggressive", pfr:0.30,vpip:0.45,cbet:0.88,foldCbet:0.28,bluff:0.40,aggPost:0.80},
+  {name:"Cal",   emoji:"📞",style:"Calling Station",  pfr:0.08,vpip:0.50,cbet:0.28,foldCbet:0.18,bluff:0.06,aggPost:0.22},
+  {name:"Nit",   emoji:"🔒",style:"Ultra-Tight",      pfr:0.10,vpip:0.13,cbet:0.65,foldCbet:0.68,bluff:0.08,aggPost:0.70},
+  {name:"Bully", emoji:"💪",style:"Aggressive",       pfr:0.26,vpip:0.34,cbet:0.80,foldCbet:0.42,bluff:0.32,aggPost:0.78},
+  {name:"Rookie",emoji:"🐣",style:"Recreational",     pfr:0.14,vpip:0.42,cbet:0.44,foldCbet:0.48,bluff:0.16,aggPost:0.38},
+  {name:"Shark", emoji:"🦈",style:"GTO-Balanced",     pfr:0.20,vpip:0.27,cbet:0.70,foldCbet:0.46,bluff:0.26,aggPost:0.68},
+];
+
+// posIdx = player's seat (0-7), profile = AI_PROFILES entry
+function aiDecide(posIdx, prof, hole, community, pot, toCall, myChips, stage, wasPreFlopRaiser){
+  const cat=preflopCat(hole);
+  const spr=pot>0?myChips/pot:12;
+  const deep=spr>5;
+  const r=(Math.random()-0.5)*0.08; // small noise
+
+  // ────────────────── PREFLOP ──────────────────
+  if(stage==="preflop"){
+    const facingRaise=toCall>2;
+
+    if(posIdx===1){ // BB
+      if(!facingRaise) return{action:"check"};
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3.2),myChips)};
+      if(cat==="strong"||cat==="medium") return{action:"call"};
+      if(cat==="speculative"&&deep) return{action:"call"};
+      if(toCall<=8&&Math.random()<0.52) return{action:"call"};
+      return{action:"fold"};
+    }
+    if(posIdx===0){ // SB
+      if(!facingRaise){
+        if(cat==="premium") return{action:"raise",amount:6};
+        if(cat==="strong")  return{action:"raise",amount:5};
+        if(cat==="medium"||cat==="speculative") return{action:"call"};
+        return{action:"fold"};
+      }
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
+      if(cat==="strong")  return{action:"call"};
+      if(cat==="medium"&&Math.random()<0.45) return{action:"call"};
+      return{action:"fold"};
+    }
+    if(posIdx===2||posIdx===3){ // UTG / UTG+1
+      if(!facingRaise){
+        if(cat==="premium"||cat==="strong") return{action:"raise",amount:6};
+        if(cat==="medium"&&Math.random()<0.50) return{action:"call"};
+        if(cat==="speculative"&&isSuited(hole)&&Math.random()<0.28) return{action:"call"};
+        return{action:"fold"};
+      }
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
+      if(cat==="strong"&&Math.random()<0.38) return{action:"call"};
+      return{action:"fold"};
+    }
+    if(posIdx===4||posIdx===5){ // Middle / HJ
+      if(!facingRaise){
+        if(cat==="premium"||cat==="strong") return{action:"raise",amount:6};
+        if(cat==="medium") return{action:Math.random()<0.55?"raise":"call",amount:6};
+        if(cat==="speculative"&&(isSuited(hole)||isConnected(hole))) return{action:"call"};
+        return{action:"fold"};
+      }
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
+      if(cat==="strong") return{action:"call"};
+      if(cat==="medium"&&Math.random()<0.50) return{action:"call"};
+      return{action:"fold"};
+    }
+    if(posIdx===6){ // CO
+      if(!facingRaise){
+        if(cat==="trash"&&hi(hole)<7) return{action:"fold"};
+        if(cat==="trash"&&Math.random()<0.55) return{action:"fold"};
+        return{action:"raise",amount:6};
+      }
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3.2),myChips)};
+      if(cat==="strong"||cat==="medium") return{action:"call"};
+      if(cat==="speculative"&&isSuited(hole)) return{action:"call"};
+      return{action:"fold"};
+    }
+    if(posIdx===7){ // BTN
+      if(!facingRaise){
+        if(cat==="trash"&&hi(hole)<6) return{action:"fold"};
+        if(cat==="trash"&&Math.random()<0.38) return{action:"fold"};
+        return{action:"raise",amount:6};
+      }
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
+      if(cat==="strong"||cat==="medium") return{action:"call"};
+      if(isAce(hole)||isSuited(hole)) return{action:"call"};
+      if(Math.random()<0.32) return{action:"call"};
+      return{action:"fold"};
+    }
+  }
+
+  // ────────────────── POST-FLOP ──────────────────
+  const str=postFlopStr(hole,community);
+  const eff=Math.max(0,Math.min(1,str+r));
+  const po=toCall>0?toCall/(pot+toCall):0;
+  const isEarly=posIdx<=3;
+  const isLate=posIdx>=6;
+  // position-adjusted call threshold
+  const callThr=isEarly?po+0.10:isLate?po+0.02:po+0.06;
+  // c-bet sizing: 50-75% pot depending on street
+  const cbetFrac=stage==="flop"?0.55:stage==="turn"?0.65:0.75;
+  const betSz=Math.max(2,Math.floor(pot*cbetFrac));
+
+  if(toCall>0){
+    // Very strong: raise for value
+    if(eff>=0.78){
+      if(deep&&Math.random()<(isLate?0.50:0.32)){
+        return{action:"raise",amount:Math.min(Math.floor(toCall*2.8),myChips)};
+      }
+      return{action:"call"};
+    }
+    // Good hand with equity: call
+    if(eff>callThr) return{action:"call"};
+    // Drawing hand: semi-bluff raise from late
+    if(eff>po&&isLate&&Math.random()<prof.bluff*0.6){
+      return{action:"raise",amount:Math.min(Math.floor(toCall*2.4),myChips)};
+    }
+    // Calling station always calls with anything decent
+    if(prof.style==="Calling Station"&&eff>0.18&&Math.random()<0.62) return{action:"call"};
+    // BB defends wide
+    if(posIdx===1&&eff>0.20&&Math.random()<0.48) return{action:"call"};
+    if(eff>po) return{action:"call"};
+    return{action:"fold"};
+  }
+
+  // First to act or checked to — no bet facing
+  // C-bet if was preflop raiser
+  if(wasPreFlopRaiser&&stage==="flop"){
+    if(eff>=0.40){
+      if(Math.random()<prof.cbet){
+        return{action:"bet",amount:Math.min(betSz,myChips)};
+      }
+    }
+    if(eff>=0.28&&Math.random()<prof.cbet*0.5){
+      return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.45)),myChips)};
+    }
+  }
+
+  // Value betting by position
+  if(isEarly){
+    if(eff>=0.62){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*(stage==="river"?0.72:0.58))),myChips)};}
+    return{action:"check"};
+  }
+  if(posIdx===4||posIdx===5){
+    if(eff>=0.55){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.60)),myChips)};}
+    if(eff>=0.36&&stage==="flop"&&Math.random()<0.38){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.48)),myChips)};}
+    if(eff>=0.36&&stage==="turn"&&Math.random()<prof.aggPost*0.5){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.55)),myChips)};}
+    return{action:"check"};
+  }
+  if(posIdx===6){ // CO
+    if(eff>=0.50){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.62)),myChips)};}
+    if(Math.random()<prof.aggPost*0.55){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.50)),myChips)};}
+    return{action:"check"};
+  }
+  if(posIdx===7){ // BTN — most aggressive
+    if(eff>=0.44){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.65)),myChips)};}
+    if(Math.random()<prof.aggPost*0.65){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.52)),myChips)};}
+    return{action:"check"};
+  }
+  if(posIdx===0){ // SB
+    if(eff>=0.64){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.60)),myChips)};}
+    return{action:"check"};
+  }
+  if(posIdx===1){ // BB
+    if(eff>=0.58){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.58)),myChips)};}
+    return{action:"check"};
+  }
+  return{action:"check"};
+}
+
+// ═══════════════════════════════════════════════════════════════
+// POST-GAME FEEDBACK ENGINE
+// Analyses the user's decisions across the hand
+// ═══════════════════════════════════════════════════════════════
+function generateFeedback(userActions, gs, userPos){
+  // userActions: array of {stage, action, amount, pot, toCall, holeCards, community}
+  const feedback=[];
+  const BB=2;
+
+  for(const a of userActions){
+    const{stage,action,amount,pot,toCall,holeCards,community}=a;
+    const str=stage==="preflop"?preflopCat(holeCards):postFlopStr(holeCards,community);
+    const potOdds=toCall>0?toCall/(pot+toCall):0;
+    const isPreflop=stage==="preflop";
+
+    if(isPreflop){
+      // Limp with strong hand
+      if(action==="call"&&toCall===BB){
+        const cat=preflopCat(holeCards);
+        if(cat==="premium"||cat==="strong"){
+          feedback.push({type:"warn",icon:"⚠️",msg:`Preflop limp with ${cat} hand — raising here builds the pot and charges weaker hands.`});
+        }
+      }
+      // Raise sizing
+      if((action==="raise"||action==="bet")&&amount>0){
+        const mult=amount/BB;
+        if(mult<2.5) feedback.push({type:"warn",icon:"📏",msg:`Open raise of ${amount} (${mult.toFixed(1)}x BB) is small — standard live open is 3–4x BB.`});
+        if(mult>6)   feedback.push({type:"warn",icon:"📏",msg:`Open raise of ${amount} (${mult.toFixed(1)}x BB) is very large — polarises your range and may get folded out.`});
+      }
+      // Calling a 3-bet with trash
+      if(action==="call"&&toCall>10&&preflopCat(holeCards)==="trash"){
+        feedback.push({type:"warn",icon:"🚫",msg:`Calling a 3-bet with a weak hand costs chips — this is usually a fold.`});
+      }
+    } else {
+      // Post-flop with strong made hand but only checking
+      if(action==="check"&&community.length>0){
+        const pfStr=postFlopStr(holeCards,community);
+        if(pfStr>=0.70){
+          feedback.push({type:"warn",icon:"💰",msg:`${stage.charAt(0).toUpperCase()+stage.slice(1)}: You have a strong hand (${handCategory(holeCards,community)}) — checking misses value. Bet 50–70% pot.`});
+        }
+      }
+      // Bet sizing
+      if((action==="bet"||action==="raise")&&pot>0&&amount>0){
+        const frac=amount/pot;
+        if(frac<0.25) feedback.push({type:"warn",icon:"📏",msg:`${stage}: Tiny bet (${Math.round(frac*100)}% pot) — micro-bets are exploitable. Aim for 40–75% pot.`});
+        if(frac>1.5&&pot>10) feedback.push({type:"info",icon:"💡",msg:`${stage}: Oversized bet (${Math.round(frac*100)}% pot) — this works as a semi-bluff blocker bet or with a monster.`});
+      }
+      // Folding with good pot odds
+      if(action==="fold"&&toCall>0){
+        const pfStr=postFlopStr(holeCards,community);
+        if(pfStr>potOdds+0.15){
+          feedback.push({type:"warn",icon:"🃏",msg:`${stage}: You folded with ${Math.round(pfStr*100)}% equity vs ${Math.round(potOdds*100)}% pot odds — this was likely a profitable call.`});
+        }
+      }
+      // Calling with no equity
+      if(action==="call"&&toCall>0){
+        const pfStr=postFlopStr(holeCards,community);
+        if(pfStr<potOdds*0.7&&pfStr<0.20){
+          feedback.push({type:"warn",icon:"🗑️",msg:`${stage}: Called with very low equity (~${Math.round(pfStr*100)}%) — against typical ranges this costs money.`});
+        }
+      }
+    }
+  }
+
+  if(feedback.length===0) feedback.push({type:"good",icon:"✅",msg:"Solid hand — no major leaks detected in your betting lines."});
+  return feedback;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CHIP STACK VISUAL
+// ═══════════════════════════════════════════════════════════════
+const CHIP_DEFS=[
   {val:100,bg:"#111",border:"#ffd700"},
-  {val:25, bg:"#003080",border:"#5588ff"},
+  {val:25, bg:"#003080",border:"#5599ff"},
   {val:10, bg:"#004020",border:"#40c060"},
   {val:5,  bg:"#7a0000",border:"#ff6060"},
   {val:1,  bg:"#ddd",border:"#999"},
 ];
-function ChipStack({amount}) {
-  if (!amount||amount<=0) return null;
-  let rem=amount; const chips=[];
-  for (const cd of CHIP_DEFS) {
-    const count=Math.floor(rem/cd.val);
-    if (count>0){chips.push({...cd,count:Math.min(count,4)});rem-=count*cd.val;}
-  }
-  return (
+function ChipStack({amount}){
+  if(!amount||amount<=0)return null;
+  let rem=amount;const chips=[];
+  for(const cd of CHIP_DEFS){const count=Math.floor(rem/cd.val);if(count>0){chips.push({...cd,count:Math.min(count,4)});rem-=count*cd.val;}}
+  return(
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
       {chips.map((c,ci)=>Array(c.count).fill(0).map((_,ki)=>(
-        <div key={`${ci}-${ki}`} style={{width:22,height:6,borderRadius:3,background:c.bg,border:`2px solid ${c.border}`,boxShadow:"0 1px 2px rgba(0,0,0,0.7)",marginTop:ki===0&&ci===0?0:-3}}/>
+        <div key={`${ci}-${ki}`} style={{width:20,height:5,borderRadius:2,background:c.bg,border:`2px solid ${c.border}`,boxShadow:"0 1px 2px rgba(0,0,0,0.7)",marginTop:ki===0&&ci===0?0:-3}}/>
       )))}
-      <div style={{fontSize:8,fontWeight:"bold",color:"#ffd700",background:"rgba(0,0,0,0.88)",borderRadius:7,padding:"1px 4px",marginTop:2,border:"1px solid #443200",whiteSpace:"nowrap"}}>${amount}</div>
+      <div style={{fontSize:8,fontWeight:"bold",color:"#ffd700",background:"rgba(0,0,0,0.9)",borderRadius:5,padding:"1px 3px",marginTop:1,border:"1px solid #443200",whiteSpace:"nowrap"}}>${amount}</div>
     </div>
   );
 }
 
-// ─── CARD ────────────────────────────────────────────────────────────────────
-function Card({card,faceDown=false,small=false}) {
-  // small = on player seat (very compact), normal = community cards
-  const w=small?22:38, h=small?32:52;
-  if (faceDown) return (
-    <div style={{width:w,height:h,borderRadius:4,background:"linear-gradient(135deg,#1a3a6b,#0d2040)",border:"2px solid #2a5a9b",boxShadow:"0 1px 3px rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <span style={{color:"#2a5a9b",fontSize:small?9:13}}>🂠</span>
+// ═══════════════════════════════════════════════════════════════
+// CARD COMPONENT
+// ═══════════════════════════════════════════════════════════════
+function Card({card,faceDown=false,small=false}){
+  const w=small?22:40,h=small?32:56;
+  if(faceDown)return(
+    <div style={{width:w,height:h,borderRadius:4,background:"linear-gradient(135deg,#1a3a6b,#0d2040)",border:"2px solid #2a5a9b",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <span style={{color:"#2a5a9b",fontSize:small?9:15}}>🂠</span>
     </div>
   );
   const red=card.suit==="♥"||card.suit==="♦";
-  return (
+  return(
     <div style={{width:w,height:h,borderRadius:4,background:"white",border:"2px solid #bbb",boxShadow:"0 1px 4px rgba(0,0,0,0.4)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:red?"#c00":"#111"}}>
-      <div style={{fontSize:small?7:11,lineHeight:1,fontWeight:"bold"}}>{card.rank}</div>
-      <div style={{fontSize:small?11:17,lineHeight:1}}>{card.suit}</div>
+      <div style={{fontSize:small?7:12,lineHeight:1,fontWeight:"bold"}}>{card.rank}</div>
+      <div style={{fontSize:small?11:18,lineHeight:1}}>{card.suit}</div>
     </div>
   );
 }
 
-// ─── PLAYER SEAT ─────────────────────────────────────────────────────────────
-const ACTION_COLORS={fold:"#e44",check:"#888",call:"#4af",bet:"#fa0",raise:"#f80",allin:"#f00"};
-
-function PlayerSeat({player,isUser,isActive,isDealer,isSB,isBB,showCards,lastAction}) {
-  const {name,emoji,chips,folded,holeCards} = player;
-  const posShort = POS_SHORT[player.id];
-  const bg = folded?"rgba(20,20,20,0.7)":isUser?"rgba(6,44,160,0.97)":"rgba(5,28,5,0.97)";
-  const glow = isActive?"0 0 0 2px #ffd700, 0 0 10px rgba(255,215,0,0.7)":"none";
-
-  return (
-    <div style={{background:bg,borderRadius:8,padding:"3px 4px",border:`2px solid ${isActive?"#ffd700":"rgba(255,255,255,0.1)"}`,boxShadow:glow,width:72,opacity:folded?0.38:1,transition:"box-shadow 0.2s,border-color 0.2s",position:"relative",userSelect:"none"}}>
-      {/* Badges */}
-      {isDealer&&<div style={{position:"absolute",top:-8,right:-8,background:"#ffd700",color:"#000",borderRadius:"50%",width:15,height:15,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:"bold",zIndex:10}}>D</div>}
-      {isSB&&<div style={{position:"absolute",top:-8,left:0,background:"#50a0ff",color:"#000",borderRadius:"50%",width:15,height:15,display:"flex",alignItems:"center",justifyContent:"center",fontSize:6,fontWeight:"bold",zIndex:10}}>SB</div>}
-      {isBB&&<div style={{position:"absolute",top:-8,left:isSB?17:0,background:"#ff8050",color:"#000",borderRadius:"50%",width:15,height:15,display:"flex",alignItems:"center",justifyContent:"center",fontSize:6,fontWeight:"bold",zIndex:10}}>BB</div>}
-      {/* Last action tag — most important for reading the game */}
-      {lastAction&&(
-        <div style={{position:"absolute",top:-8,right:isDealer?9:0,background:ACTION_COLORS[lastAction]||"#555",color:"#000",borderRadius:5,padding:"0px 3px",fontSize:7,fontWeight:"bold",zIndex:10,whiteSpace:"nowrap",lineHeight:"15px"}}>
-          {lastAction.toUpperCase()}
-        </div>
-      )}
-      {/* Name row */}
+// ═══════════════════════════════════════════════════════════════
+// PLAYER SEAT
+// ═══════════════════════════════════════════════════════════════
+const ACOL={fold:"#e44",check:"#777",call:"#4af",bet:"#fa0",raise:"#f80",allin:"#f00"};
+function PlayerSeat({player,isUser,isActive,isDealer,isSB,isBB,showCards,lastAction}){
+  const{name,emoji,chips,folded,holeCards}=player;
+  const bg=folded?"rgba(18,18,18,0.7)":isUser?"rgba(4,38,145,0.97)":"rgba(4,26,4,0.97)";
+  const bdr=isActive?"2px solid #ffd700":"2px solid rgba(255,255,255,0.1)";
+  const glow=isActive?"0 0 0 2px #ffd700,0 0 12px rgba(255,215,0,0.65)":"none";
+  return(
+    <div style={{background:bg,borderRadius:8,padding:"3px 4px",border:bdr,boxShadow:glow,width:70,opacity:folded?0.35:1,position:"relative",userSelect:"none",flexShrink:0}}>
+      {isDealer&&<div style={{position:"absolute",top:-9,right:-9,background:"#ffd700",color:"#000",borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,fontWeight:"bold",zIndex:10}}>D</div>}
+      {isSB&&<div style={{position:"absolute",top:-9,left:0,background:"#50a0ff",color:"#000",borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:6,fontWeight:"bold",zIndex:10}}>SB</div>}
+      {isBB&&<div style={{position:"absolute",top:-9,left:isSB?18:0,background:"#ff8050",color:"#000",borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:6,fontWeight:"bold",zIndex:10}}>BB</div>}
+      {lastAction&&<div style={{position:"absolute",top:-9,right:isDealer?10:0,background:ACOL[lastAction]||"#555",color:"#000",borderRadius:5,padding:"0 3px",fontSize:7,fontWeight:"bold",zIndex:10,whiteSpace:"nowrap",lineHeight:"14px"}}>{lastAction.toUpperCase()}</div>}
       <div style={{display:"flex",alignItems:"center",gap:2,marginBottom:1}}>
-        <span style={{fontSize:11}}>{emoji}</span>
-        <div style={{overflow:"hidden"}}>
-          <div style={{color:"#fff",fontSize:9,fontWeight:"bold",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:46}}>{name}</div>
-          <div style={{color:"#777",fontSize:7,lineHeight:1}}>{posShort}</div>
+        <span style={{fontSize:12}}>{emoji}</span>
+        <div>
+          <div style={{color:"#fff",fontSize:9,fontWeight:"bold",lineHeight:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:44}}>{name}</div>
+          <div style={{color:"#666",fontSize:7,lineHeight:1}}>{POS_SHORT[player.id]}</div>
         </div>
       </div>
-      {/* Hole cards */}
       <div style={{display:"flex",gap:1,justifyContent:"center",marginBottom:1}}>
         {holeCards&&holeCards.map((c,i)=>isUser||showCards?<Card key={i} card={c} small/>:<Card key={i} faceDown small/>)}
       </div>
-      {/* Stack */}
       <div style={{color:"#7dff7d",fontSize:8,textAlign:"center",fontWeight:"bold",lineHeight:1}}>${chips}</div>
-      {folded&&<div style={{color:"#f55",fontSize:7,textAlign:"center",fontWeight:"bold"}}>FOLD</div>}
+      {folded&&<div style={{color:"#f55",fontSize:7,textAlign:"center"}}>FOLD</div>}
     </div>
   );
 }
 
-// Seat layout: percentage positions within the table paddingTop box.
-// Table paddingTop = 44% of viewport width. Seats use transform:translate(-50%,-50%)
-// so coords are center of each seat. Kept well inside the box edges.
-const SEATS = [
-  {top:"88%",left:"26%", ct:"-36px",cl:"50%",ctr:"translateX(-50%)"},  // 0 SB  (bottom-left)
-  {top:"88%",left:"60%", ct:"-36px",cl:"50%",ctr:"translateX(-50%)"},  // 1 BB  (bottom-right)
-  {top:"68%",left:"88%", ct:"35%",  cl:"-36px"},                        // 2 UTG (right-low)
-  {top:"30%",left:"88%", ct:"35%",  cl:"-36px"},                        // 3 UTG+1 (right-high)
-  {top:"8%", left:"68%", ct:"95%",  cl:"50%",ctr:"translateX(-50%)"},   // 4 Mid (top-right)
-  {top:"8%", left:"30%", ct:"95%",  cl:"50%",ctr:"translateX(-50%)"},   // 5 HJ  (top-left)
-  {top:"30%",left:"10%", ct:"35%",  cl:"88%"},                          // 6 CO  (left-high)
-  {top:"68%",left:"10%", ct:"35%",  cl:"88%"},                          // 7 BTN (left-low)
+// Seat positions as % of paddingTop box. Portrait: table = top 50%.
+// paddingTop: 100% of width means table height = screen width (portrait = ~390px on typical phone)
+// We use paddingTop: 95% so table is slightly less than screen width.
+const SEATS=[
+  {top:"86%",left:"27%", ct:"-34px",cl:"50%",ctr:"translateX(-50%)"},  // 0 SB
+  {top:"86%",left:"60%", ct:"-34px",cl:"50%",ctr:"translateX(-50%)"},  // 1 BB
+  {top:"68%",left:"88%", ct:"32%",  cl:"-32px"},                        // 2 UTG
+  {top:"32%",left:"88%", ct:"32%",  cl:"-32px"},                        // 3 UTG+1
+  {top:"8%", left:"68%", ct:"92%",  cl:"50%",ctr:"translateX(-50%)"},   // 4 Middle
+  {top:"8%", left:"30%", ct:"92%",  cl:"50%",ctr:"translateX(-50%)"},   // 5 HJ
+  {top:"32%",left:"10%", ct:"32%",  cl:"88%"},                          // 6 CO
+  {top:"68%",left:"10%", ct:"32%",  cl:"88%"},                          // 7 BTN
 ];
 
-// ─── CARD PICKER ─────────────────────────────────────────────────────────────
-function CardPicker({label,selected,onSelect,usedCards}) {
-  const [step,setStep] = useState("idle");
-  const [pickedRank,setPickedRank] = useState(null);
-  const ref = useRef(null);
+// ═══════════════════════════════════════════════════════════════
+// MAIN APP
+// ═══════════════════════════════════════════════════════════════
+function PokerTrainer(){
+  const[gs,setGs]=useState(null);
+  const[phase,setPhase]=useState("start");
+  const[assessPhase,setAssessPhase]=useState("");
+  const[assessQueue,setAssessQueue]=useState([]);
+  const[assessIdx,setAssessIdx]=useState(0);
+  const[assessments,setAssessments]=useState({});
+  const[rangeOptions,setRangeOptions]=useState({});
+  const[actionLog,setActionLog]=useState([]);
+  const[betAmt,setBetAmt]=useState(6);
+  const[showdown,setShowdown]=useState(false);
+  const[winner,setWinner]=useState(null);
+  const[userPos,setUserPos]=useState(3);
+  const[assessResults,setAssessResults]=useState(null);
+  const[lastActions,setLastActions]=useState({});
+  const[thinkingId,setThinkingId]=useState(null);
+  const[streetHist,setStreetHist]=useState({});
+  const[userActionHistory,setUserActionHistory]=useState([]);
+  const[preFlopRaisers,setPreFlopRaisers]=useState(new Set());
+  const timerRef=useRef(null);
 
-  useEffect(()=>{
-    function h(e){if(ref.current&&!ref.current.contains(e.target)){setStep("idle");setPickedRank(null);}}
-    if(step!=="idle") document.addEventListener("touchstart",h,{passive:true});
-    return()=>document.removeEventListener("touchstart",h);
-  },[step]);
-
-  function open(){if(selected){onSelect(null);return;}setStep("rank");}
-  function pickRank(r){setPickedRank(r);setStep("suit");}
-  function pickSuit(s){onSelect({rank:pickedRank,suit:s});setStep("idle");setPickedRank(null);}
-  function isUsed(r,s){return usedCards.some(c=>c&&c.rank===r&&c.suit===s);}
-  function rankDead(r){return SUITS.every(s=>isUsed(r,s));}
-  const red=selected&&(selected.suit==="♥"||selected.suit==="♦");
-
-  return (
-    <div ref={ref} style={{position:"relative",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-      <div style={{color:"#aaa",fontSize:10,textTransform:"uppercase",letterSpacing:1}}>{label}</div>
-      <div onClick={open} style={{width:48,height:66,borderRadius:7,cursor:"pointer",background:selected?"white":"rgba(255,255,255,0.04)",border:`2px solid ${selected?"#ffd700":"rgba(255,215,0,0.3)"}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:selected?(red?"#c00":"#111"):"#444",boxShadow:selected?"0 0 10px rgba(255,215,0,0.35)":"none"}}>
-        {selected?<><div style={{fontSize:13,fontWeight:"bold",lineHeight:1}}>{selected.rank}</div><div style={{fontSize:20,lineHeight:1}}>{selected.suit}</div></>:<div style={{fontSize:24}}>?</div>}
-      </div>
-      {selected&&<div style={{color:"#666",fontSize:9}}>tap to clear</div>}
-
-      {step==="rank"&&(
-        <div style={{position:"absolute",bottom:"110%",left:"50%",transform:"translateX(-50%)",zIndex:500,background:"#0b1c35",borderRadius:10,padding:9,border:"2px solid #ffd700",boxShadow:"0 4px 30px rgba(0,0,0,0.95)",width:234}}>
-          <div style={{color:"#ffd700",fontSize:10,textAlign:"center",marginBottom:6,letterSpacing:1}}>SELECT RANK</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
-            {[...RANKS].reverse().map(r=>{
-              const dead=rankDead(r);
-              return <button key={r} onClick={()=>!dead&&pickRank(r)} style={{background:dead?"rgba(255,255,255,0.03)":"rgba(255,255,255,0.14)",color:dead?"#333":"#fff",border:"1px solid rgba(255,255,255,0.1)",borderRadius:5,padding:"7px 0",fontSize:12,fontWeight:"bold",cursor:dead?"default":"pointer"}}>{r}</button>;
-            })}
-          </div>
-        </div>
-      )}
-      {step==="suit"&&(
-        <div style={{position:"absolute",bottom:"110%",left:"50%",transform:"translateX(-50%)",zIndex:500,background:"#0b1c35",borderRadius:10,padding:10,border:"2px solid #ffd700",boxShadow:"0 4px 30px rgba(0,0,0,0.95)"}}>
-          <div style={{color:"#ffd700",fontSize:10,textAlign:"center",marginBottom:7,letterSpacing:1}}>{pickedRank} — SUIT</div>
-          <div style={{display:"flex",gap:6}}>
-            {SUITS.map(s=>{const dead=isUsed(pickedRank,s);const r=s==="♥"||s==="♦";return <button key={s} onClick={()=>!dead&&pickSuit(s)} style={{width:48,height:60,borderRadius:6,background:dead?"rgba(255,255,255,0.03)":"white",color:dead?"#333":r?"#c00":"#111",border:dead?"1px solid #222":"2px solid #ccc",fontSize:26,cursor:dead?"default":"pointer",boxShadow:dead?"none":"0 2px 6px rgba(0,0,0,0.4)"}}>{s}</button>;})}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
-function PokerTrainer() {
-  const [gs, setGs] = useState(null);
-  const [phase, setPhase] = useState("start");
-  const [assessPhase, setAssessPhase] = useState("");
-  const [assessQueue, setAssessQueue] = useState([]);
-  const [assessIdx, setAssessIdx] = useState(0);
-  const [assessments, setAssessments] = useState({});
-  const [card1, setCard1] = useState(null);
-  const [card2, setCard2] = useState(null);
-  const [actionLog, setActionLog] = useState([]);
-  const [betAmt, setBetAmt] = useState(6);
-  const [showdown, setShowdown] = useState(false);
-  const [winner, setWinner] = useState(null);
-  const [userPos, setUserPos] = useState(3);
-  const [assessResults, setAssessResults] = useState(null);
-  const [lastActions, setLastActions] = useState({});
-  const [thinkingId, setThinkingId] = useState(null);
-  const [streetHist, setStreetHist] = useState({});
-  const timerRef = useRef(null);
-
-  function initGame() {
-    const deck = shuffle(makeDeck()); let di=0;
-    const players = [];
-    const aiSlots = Array.from({length:8},(_,i)=>i).filter(i=>i!==userPos);
-    const names = shuffle([
-      {name:"Rocky",emoji:"🪨"},{name:"Maniac",emoji:"🔥"},{name:"Cal",emoji:"📞"},
-      {name:"Nit",emoji:"🔒"},{name:"Bully",emoji:"💪"},{name:"Rookie",emoji:"🐣"},
-      {name:"Shark",emoji:"🦈"},
-    ]);
-    let ni=0;
-    for (let i=0;i<8;i++) {
-      if (i===userPos) {
-        players.push({id:i,name:"You",emoji:"👤",isUser:true,position:POS_NAMES[i],chips:200,holeCards:[deck[di++],deck[di++]],folded:false,allIn:false,currentBet:0});
+  function initGame(){
+    const deck=shuffle(makeDeck());let di=0;
+    const players=[];
+    const aiProfs=shuffle([...AI_PROFILES]);let ai=0;
+    for(let i=0;i<8;i++){
+      if(i===userPos){
+        players.push({id:i,name:"You",emoji:"👤",isUser:true,position:POS_NAMES[i],chips:200,
+          holeCards:[deck[di++],deck[di++]],folded:false,allIn:false,currentBet:0,profile:null});
       } else {
-        const n=names[ni++];
-        players.push({id:i,name:n.name,emoji:n.emoji,isUser:false,position:POS_NAMES[i],chips:200,holeCards:[deck[di++],deck[di++]],folded:false,allIn:false,currentBet:0});
+        const p=aiProfs[ai++]||AI_PROFILES[0];
+        players.push({id:i,name:p.name,emoji:p.emoji,isUser:false,position:POS_NAMES[i],chips:200,
+          holeCards:[deck[di++],deck[di++]],folded:false,allIn:false,currentBet:0,profile:p});
       }
     }
     const SB=1,BB=2;
-    players[0].chips-=SB; players[0].currentBet=SB;
-    players[1].chips-=BB; players[1].currentBet=BB;
-    const state={players,deck:deck.slice(di),community:[],pot:SB+BB,stage:"preflop",activeIdx:2,dealerIdx:7,sbIdx:0,bbIdx:1,currentBet:BB,lastRaiser:1,actionsThisRound:0};
-    setGs(state); setPhase("playing");
-    setAssessments({}); setActionLog(["New hand. Blinds $1/$2."]);
-    setShowdown(false); setWinner(null); setAssessResults(null);
-    setLastActions({}); setThinkingId(null); setBetAmt(6);
-    setCard1(null); setCard2(null); setStreetHist({});
+    players[0].chips-=SB;players[0].currentBet=SB;
+    players[1].chips-=BB;players[1].currentBet=BB;
+    const state={players,deck:deck.slice(di),community:[],pot:SB+BB,
+      stage:"preflop",activeIdx:2,dealerIdx:7,sbIdx:0,bbIdx:1,
+      currentBet:BB,lastRaiser:1,actionsThisRound:0};
+    setGs(state);setPhase("playing");
+    setAssessments({});setRangeOptions({});
+    setActionLog(["New hand. Blinds $1/$2."]);
+    setShowdown(false);setWinner(null);setAssessResults(null);
+    setLastActions({});setThinkingId(null);setBetAmt(6);
+    setStreetHist({});setUserActionHistory([]);setPreFlopRaisers(new Set());
   }
 
-  // AI loop
   useEffect(()=>{
-    if (phase!=="playing"||!gs) return;
+    if(phase!=="playing"||!gs)return;
     const active=gs.players[gs.activeIdx];
-    if (!active) return;
-    if (active.folded||active.allIn){advanceTurn(gs);return;}
-    if (active.isUser) return;
+    if(!active)return;
+    if(active.folded||active.allIn){advanceTurn(gs);return;}
+    if(active.isUser)return;
     setThinkingId(active.id);
-    const delay=1800+Math.random()*1800;
+    const delay=1600+Math.random()*1600;
     timerRef.current=setTimeout(()=>{
       setThinkingId(null);
       const toCall=gs.currentBet-active.currentBet;
-      const numActive=gs.players.filter(p=>!p.folded).length;
-      const action=aiDecide(active.id,active.holeCards,gs.community,gs.pot,toCall,active.chips,gs.stage,numActive);
+      const wasPFR=preFlopRaisers.has(active.id);
+      const action=aiDecide(active.id,active.profile,active.holeCards,gs.community,gs.pot,toCall,active.chips,gs.stage,wasPFR);
       applyAction(gs,gs.activeIdx,action);
     },delay);
     return()=>clearTimeout(timerRef.current);
   },[gs,phase]);
 
-  function applyAction(state,idx,action) {
+  function applyAction(state,idx,action){
     const ng=JSON.parse(JSON.stringify(state));
     const p=ng.players[idx];
     let logTxt=`${p.name}: `;
     let aName=action.action;
 
-    if (action.action==="fold"){p.folded=true;logTxt+="Folds";}
-    else if (action.action==="check"){logTxt+="Checks";}
-    else if (action.action==="call"){
+    if(action.action==="fold"){p.folded=true;logTxt+="Folds";}
+    else if(action.action==="check"){logTxt+="Checks";}
+    else if(action.action==="call"){
       const tc=Math.min(ng.currentBet-p.currentBet,p.chips);
-      p.chips-=tc;ng.pot+=tc;p.currentBet+=tc;
-      logTxt+=`Calls $${tc}`;
+      p.chips-=tc;ng.pot+=tc;p.currentBet+=tc;logTxt+=`Calls $${tc}`;
     }
-    else if (action.action==="bet"){
+    else if(action.action==="bet"){
       const amt=Math.min(action.amount,p.chips);
       p.chips-=amt;ng.pot+=amt;p.currentBet+=amt;
-      ng.currentBet=p.currentBet;ng.lastRaiser=idx;
-      logTxt+=`Bets $${amt}`;
+      ng.currentBet=p.currentBet;ng.lastRaiser=idx;logTxt+=`Bets $${amt}`;
+      if(ng.stage==="preflop") setPreFlopRaisers(prev=>new Set([...prev,idx]));
     }
-    else if (action.action==="raise"){
+    else if(action.action==="raise"){
       const tc=ng.currentBet-p.currentBet;
       const total=Math.min(tc+action.amount,p.chips);
       p.chips-=total;ng.pot+=total;p.currentBet+=total;
-      ng.currentBet=p.currentBet;ng.lastRaiser=idx;
-      logTxt+=`Raises to $${p.currentBet}`;
+      ng.currentBet=p.currentBet;ng.lastRaiser=idx;logTxt+=`Raises to $${p.currentBet}`;
+      if(ng.stage==="preflop") setPreFlopRaisers(prev=>new Set([...prev,idx]));
     }
 
     ng.actionsThisRound++;
@@ -620,392 +624,498 @@ function PokerTrainer() {
     setActionLog(prev=>[...prev.slice(-30),logTxt]);
     const stg=ng.stage;
     setStreetHist(prev=>{
-      const sm=prev[stg]||{};
-      const pa=sm[idx]||[];
-      return {...prev,[stg]:{...sm,[idx]:[...pa,logTxt.replace(/^[^:]+: /,"")]}};
+      const sm=prev[stg]||{};const pa=sm[idx]||[];
+      return{...prev,[stg]:{...sm,[idx]:[...pa,logTxt.replace(/^[^:]+: /,"")]}};
     });
+    // Track user actions for feedback
+    if(p.isUser){
+      setUserActionHistory(prev=>[...prev,{
+        stage:stg,action:aName,amount:action.amount||0,
+        pot:ng.pot,toCall:ng.currentBet-p.currentBet,
+        holeCards:JSON.parse(JSON.stringify(p.holeCards)),
+        community:JSON.parse(JSON.stringify(ng.community))
+      }]);
+    }
     advanceTurn(ng);
   }
 
-  function advanceTurn(state) {
+  function advanceTurn(state){
     const alive=state.players.filter(p=>!p.folded);
-    if (alive.length===1) {
+    if(alive.length===1){
       const ng=JSON.parse(JSON.stringify(state));
       ng.players.find(p=>p.id===alive[0].id).chips+=ng.pot;
       setWinner(ng.players.find(p=>p.id===alive[0].id));
-      setGs(ng); beginAssessment(ng,"final"); return;
+      setGs(ng);beginAssessment(ng,"final");return;
     }
     let next=(state.activeIdx+1)%8,loops=0;
     while((state.players[next].folded||state.players[next].allIn)&&loops<8){next=(next+1)%8;loops++;}
-    if (roundOver(state,next)) advanceStage(state);
+    if(roundOver(state,next)) advanceStage(state);
     else setGs({...state,activeIdx:next});
   }
 
-  function roundOver(state,nextIdx) {
+  function roundOver(state,nextIdx){
     const alive=state.players.filter(p=>!p.folded&&!p.allIn);
-    if (alive.length<=1) return true;
+    if(alive.length<=1)return true;
     const bets=alive.map(p=>p.currentBet);
-    if (bets.every(b=>b===bets[0])&&state.actionsThisRound>=alive.length) return true;
-    if (state.lastRaiser!==undefined&&nextIdx===state.lastRaiser&&state.actionsThisRound>=alive.length) return true;
+    if(bets.every(b=>b===bets[0])&&state.actionsThisRound>=alive.length)return true;
+    if(state.lastRaiser!==undefined&&nextIdx===state.lastRaiser&&state.actionsThisRound>=alive.length)return true;
     return false;
   }
 
-  function advanceStage(state) {
+  function advanceStage(state){
     const ng=JSON.parse(JSON.stringify(state));
-    for (const p of ng.players) p.currentBet=0;
+    for(const p of ng.players)p.currentBet=0;
     ng.currentBet=0;ng.lastRaiser=undefined;ng.actionsThisRound=0;
     setLastActions({});
     function firstActive(g){let i=g.sbIdx;while(g.players[i].folded||g.players[i].allIn)i=(i+1)%8;return i;}
-    if (ng.stage==="preflop"){ng.community=[ng.deck[0],ng.deck[1],ng.deck[2]];ng.deck=ng.deck.slice(3);ng.stage="flop";ng.activeIdx=firstActive(ng);setGs(ng);beginAssessment(ng,"preflop");}
-    else if (ng.stage==="flop"){ng.community.push(ng.deck[0]);ng.deck=ng.deck.slice(1);ng.stage="turn";ng.activeIdx=firstActive(ng);setGs(ng);beginAssessment(ng,"flop");}
-    else if (ng.stage==="turn"){ng.community.push(ng.deck[0]);ng.deck=ng.deck.slice(1);ng.stage="river";ng.activeIdx=firstActive(ng);setGs(ng);beginAssessment(ng,"turn");}
-    else if (ng.stage==="river"){resolveShowdown(ng);}
+    if(ng.stage==="preflop"){
+      ng.community=[ng.deck[0],ng.deck[1],ng.deck[2]];ng.deck=ng.deck.slice(3);
+      ng.stage="flop";ng.activeIdx=firstActive(ng);setGs(ng);beginAssessment(ng,"preflop");
+    } else if(ng.stage==="flop"){
+      ng.community.push(ng.deck[0]);ng.deck=ng.deck.slice(1);
+      ng.stage="turn";ng.activeIdx=firstActive(ng);setGs(ng);beginAssessment(ng,"flop");
+    } else if(ng.stage==="turn"){
+      ng.community.push(ng.deck[0]);ng.deck=ng.deck.slice(1);
+      ng.stage="river";ng.activeIdx=firstActive(ng);setGs(ng);beginAssessment(ng,"turn");
+    } else if(ng.stage==="river"){resolveShowdown(ng);}
   }
 
-  function resolveShowdown(state) {
+  function resolveShowdown(state){
     const ng=JSON.parse(JSON.stringify(state));
     const alive=ng.players.filter(p=>!p.folded);
     let best=null,winners=[];
-    for (const p of alive){
+    for(const p of alive){
       const ev=evaluateHand([...p.holeCards,...ng.community]);
       p.handEval=ev;
-      if (!best||ev.rank>best.rank||(ev.rank===best.rank&&ev.tb>best.tb)){best=ev;winners=[p];}
-      else if (ev.rank===best.rank&&ev.tb===best.tb) winners.push(p);
+      if(!best||ev.rank>best.rank||(ev.rank===best.rank&&ev.tb>best.tb)){best=ev;winners=[p];}
+      else if(ev.rank===best.rank&&ev.tb===best.tb)winners.push(p);
     }
     const share=Math.floor(ng.pot/winners.length);
-    for (const w of winners) ng.players.find(p=>p.id===w.id).chips+=share;
+    for(const w of winners)ng.players.find(p=>p.id===w.id).chips+=share;
     setWinner(ng.players.find(p=>p.id===winners[0].id));
-    setGs(ng); beginAssessment(ng,"river");
+    setGs(ng);beginAssessment(ng,"river");
   }
 
-  function beginAssessment(state,stg) {
+  function beginAssessment(state,stg){
     const toAssess=state.players.filter(p=>!p.folded&&!p.isUser);
-    if (toAssess.length===0){if(stg==="river"||stg==="final")finalizeResults(state);else setPhase("playing");return;}
-    setAssessPhase(stg); setAssessQueue(toAssess.map(p=>p.id));
-    setAssessIdx(0); setCard1(null); setCard2(null); setPhase("assess");
+    if(toAssess.length===0){
+      if(stg==="river"||stg==="final")finalizeResults(state);
+      else setPhase("playing");
+      return;
+    }
+    // Build range options for each player to assess
+    const opts={};
+    for(const p of toAssess){
+      const correctId=classifyHoleCards(p.holeCards);
+      opts[p.id]=genRangeOptions(correctId);
+    }
+    setRangeOptions(opts);
+    setAssessPhase(stg);
+    setAssessQueue(toAssess.map(p=>p.id));
+    setAssessIdx(0);setPhase("assess");
   }
 
-  function submitGuess() {
-    if (!card1||!card2) return;
+  function submitGuess(chosenId){
     const pid=assessQueue[assessIdx];
-    const newAss={...assessments,[assessPhase]:{...(assessments[assessPhase]||{}),[pid]:{card1,card2}}};
+    const newAss={...assessments,[assessPhase]:{...(assessments[assessPhase]||{}),[pid]:chosenId}};
     setAssessments(newAss);
-    if (assessIdx+1<assessQueue.length){setAssessIdx(assessIdx+1);setCard1(null);setCard2(null);}
-    else if (assessPhase==="river"||assessPhase==="final") finalizeResults(gs,newAss);
+    if(assessIdx+1<assessQueue.length){setAssessIdx(assessIdx+1);}
+    else if(assessPhase==="river"||assessPhase==="final") finalizeResults(gs,newAss);
     else setPhase("playing");
   }
 
-  function skipAssess(){if(assessPhase==="river"||assessPhase==="final")finalizeResults(gs,assessments);else setPhase("playing");}
+  function skipAssess(){
+    if(assessPhase==="river"||assessPhase==="final")finalizeResults(gs,assessments);
+    else setPhase("playing");
+  }
 
-  function finalizeResults(state,ass=assessments) {
+  function finalizeResults(state,ass=assessments){
     setPhase("results");setShowdown(true);
     const results=[];
-    for (const [stg,picks] of Object.entries(ass)) {
-      for (const [pidStr,guess] of Object.entries(picks)) {
+    for(const[stg,picks] of Object.entries(ass)){
+      for(const[pidStr,chosenId] of Object.entries(picks)){
         const pid=parseInt(pidStr);
         const p=state.players.find(pl=>pl.id===pid);
-        if (!p) continue;
-        const a1=p.holeCards[0],a2=p.holeCards[1];
-        const g1=guess.card1,g2=guess.card2;
-        const ceq=(x,y)=>x&&y&&x.rank===y.rank&&x.suit===y.suit;
-        const exact=(ceq(g1,a1)&&ceq(g2,a2))||(ceq(g1,a2)&&ceq(g2,a1));
-        const req=(x,y)=>x&&y&&x.rank===y.rank;
-        const approx=!exact&&((req(g1,a1)&&req(g2,a2))||(req(g1,a2)&&req(g2,a1)));
-        results.push({stg,pid,playerName:p.name,playerEmoji:p.emoji,guess,a1,a2,exact,approx});
+        if(!p)continue;
+        const correctId=classifyHoleCards(p.holeCards);
+        const correct=chosenId===correctId;
+        results.push({stg,pid,playerName:p.name,playerEmoji:p.emoji,
+          chosenId,correctId,correct,
+          holeCards:p.holeCards});
       }
     }
-    setAssessResults(results);
+    const feedback=generateFeedback(userActionHistory,state,userPos);
+    setAssessResults({results,feedback});
   }
 
-  function userAct(action,amount) {
-    if (!gs||phase!=="playing") return;
-    if (gs.players[gs.activeIdx]?.isUser) applyAction(gs,gs.activeIdx,{action,amount});
+  function userAct(action,amount){
+    if(!gs||phase!=="playing")return;
+    if(gs.players[gs.activeIdx]?.isUser) applyAction(gs,gs.activeIdx,{action,amount});
   }
 
-  // ── RENDER ──────────────────────────────────────────────────────────────
-  if (phase==="start") return <StartScreen onStart={initGame} pos={userPos} setPos={setUserPos}/>;
-  if (!gs) return null;
+  // ── RENDER ──────────────────────────────────────────────────
+  if(phase==="start") return <StartScreen onStart={initGame} pos={userPos} setPos={setUserPos}/>;
+  if(!gs) return null;
 
   const user=gs.players[userPos];
   const isUserTurn=phase==="playing"&&gs.activeIdx===userPos&&!user.folded;
   const toCall=isUserTurn?Math.max(0,gs.currentBet-user.currentBet):0;
   const assessPlayer=phase==="assess"?gs.players.find(p=>p.id===assessQueue[assessIdx]):null;
-  const usedCards=[...gs.community,...user.holeCards,...(card1?[card1]:[]),...(card2?[card2]:[])];
   const stageOrder=["preflop","flop","turn","river"];
 
-  return (
-    <div style={{width:"100%",height:"100dvh",background:"#060d18",fontFamily:"Georgia,serif",display:"flex",flexDirection:"column",overflowX:"hidden",overflowY:"hidden"}}>
+  return(
+    <div style={{height:"100dvh",display:"flex",flexDirection:"column",background:"#060d18",fontFamily:"Georgia,serif",overflow:"hidden"}}>
 
-      {/* ── TABLE — fixed height, seats contained within ── */}
-      <div style={{position:"relative",width:"100%",flexShrink:0}}>
-        <div style={{position:"relative",width:"100%",paddingTop:"44%"}}>
-          {/* Felt oval */}
-          <div style={{position:"absolute",top:"4%",left:"2%",right:"2%",bottom:"4%",background:"radial-gradient(ellipse at center,#1c6030 0%,#0e3d1a 60%,#07230f 100%)",borderRadius:"50%",border:"8px solid #2a1500",boxShadow:"0 0 0 3px #160b00,0 0 30px rgba(0,0,0,0.9),inset 0 0 30px rgba(0,0,0,0.35)"}}/>
+      {/* ═══ TOP 50%: TABLE ═══ */}
+      <div style={{height:"50%",position:"relative",flexShrink:0}}>
+        {/* Felt oval */}
+        <div style={{position:"absolute",top:"4%",left:"2%",right:"2%",bottom:"4%",
+          background:"radial-gradient(ellipse at center,#1c6030 0%,#0e3d1a 60%,#07230f 100%)",
+          borderRadius:"50%",border:"8px solid #2a1500",
+          boxShadow:"0 0 0 3px #160b00,0 0 30px rgba(0,0,0,0.9),inset 0 0 30px rgba(0,0,0,0.3)"}}/>
 
-          {/* Community cards — smaller, centered */}
-          <div style={{position:"absolute",top:"38%",left:"50%",transform:"translate(-50%,-50%)",display:"flex",gap:3,zIndex:4}}>
-            {gs.community.map((c,i)=><Card key={i} card={c}/>)}
-            {Array(5-gs.community.length).fill(0).map((_,i)=><div key={i} style={{width:38,height:52,borderRadius:4,border:"2px dashed rgba(255,255,255,0.1)"}}/>)}
-          </div>
-
-          {/* Pot */}
-          <div style={{position:"absolute",top:"62%",left:"50%",transform:"translate(-50%,-50%)",zIndex:4}}>
-            <div style={{background:"rgba(0,0,0,0.85)",borderRadius:12,padding:"3px 12px",textAlign:"center",border:"1px solid rgba(255,215,0,0.3)"}}>
-              <div style={{color:"#ffd700",fontWeight:"bold",fontSize:12}}>POT: ${gs.pot}</div>
-              <div style={{color:"#666",fontSize:8,textTransform:"uppercase",letterSpacing:1}}>{gs.stage}</div>
-            </div>
-          </div>
-
-          {/* Winner banner */}
-          {winner&&showdown&&(
-            <div style={{position:"absolute",top:"20%",left:"50%",transform:"translate(-50%,-50%)",zIndex:20,background:"rgba(0,0,0,0.95)",borderRadius:10,padding:"7px 16px",border:"2px solid #ffd700",textAlign:"center"}}>
-              <div style={{color:"#ffd700",fontSize:14,fontWeight:"bold"}}>🏆 {winner.name} wins!</div>
-              {winner.handEval&&<div style={{color:"#aaa",fontSize:10}}>{winner.handEval.name}</div>}
-            </div>
-          )}
-
-          {/* Player seats */}
-          {gs.players.map((player,i)=>{
-            const s=SEATS[i];
-            return (
-              <div key={i} style={{position:"absolute",top:s.top,left:s.left,transform:"translate(-50%,-50%)",zIndex:5}}>
-                {player.currentBet>0&&(
-                  <div style={{position:"absolute",top:s.ct,left:s.cl,right:s.cr,transform:s.ctr,zIndex:6,pointerEvents:"none"}}>
-                    <ChipStack amount={player.currentBet}/>
-                  </div>
-                )}
-                <PlayerSeat player={player} isUser={player.isUser} isActive={phase==="playing"&&gs.activeIdx===i&&!player.folded} isDealer={i===gs.dealerIdx} isSB={i===gs.sbIdx} isBB={i===gs.bbIdx} showCards={showdown||player.isUser} lastAction={lastActions[i]}/>
-                {thinkingId===player.id&&(
-                  <div style={{position:"absolute",top:-14,left:"50%",transform:"translateX(-50%)",background:"rgba(0,0,0,0.9)",borderRadius:5,padding:"1px 6px",color:"#ffd700",fontSize:8,whiteSpace:"nowrap",zIndex:20}}>thinking…</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── BOTTOM PANEL — large text, clearly visible ── */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",padding:"5px 12px 10px",gap:5,overflowY:"auto"}}>
-
-        {/* Action log — big enough to read at a glance */}
-        <div style={{background:"rgba(0,0,0,0.55)",borderRadius:8,padding:"5px 10px",minHeight:44,maxHeight:60,overflowY:"auto",border:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
-          {actionLog.slice(-3).map((l,i)=>(
-            <div key={i} style={{color:i===actionLog.slice(-3).length-1?"#eee":"#555",fontSize:12,lineHeight:1.5,fontWeight:i===actionLog.slice(-3).length-1?"bold":"normal"}}>{l}</div>
+        {/* Community cards */}
+        <div style={{position:"absolute",top:"36%",left:"50%",transform:"translate(-50%,-50%)",
+          display:"flex",gap:3,zIndex:4}}>
+          {gs.community.map((c,i)=><Card key={i} card={c}/>)}
+          {Array(5-gs.community.length).fill(0).map((_,i)=>(
+            <div key={i} style={{width:40,height:56,borderRadius:4,border:"2px dashed rgba(255,255,255,0.1)"}}/>
           ))}
         </div>
 
-        {/* ── USER ACTION PANEL ── */}
-        {isUserTurn&&phase==="playing"&&(
-          <div style={{background:"rgba(5,28,85,0.98)",borderRadius:12,padding:"10px 12px",border:"2px solid #ffd700",boxShadow:"0 0 20px rgba(255,215,0,0.2)",flexShrink:0}}>
-            {/* Header */}
-            <div style={{color:"#ffd700",fontSize:13,fontWeight:"bold",marginBottom:7,textAlign:"center",letterSpacing:0.5}}>
-              ♦ YOUR TURN {toCall>0?`— To Call: $${toCall}`:"— Check or Bet"} ♦
+        {/* Pot + stage */}
+        <div style={{position:"absolute",top:"60%",left:"50%",transform:"translate(-50%,-50%)",zIndex:4}}>
+          <div style={{background:"rgba(0,0,0,0.85)",borderRadius:12,padding:"3px 14px",
+            textAlign:"center",border:"1px solid rgba(255,215,0,0.3)"}}>
+            <div style={{color:"#ffd700",fontWeight:"bold",fontSize:13}}>POT: ${gs.pot}</div>
+            <div style={{color:"#555",fontSize:8,textTransform:"uppercase",letterSpacing:1}}>{gs.stage}</div>
+          </div>
+        </div>
+
+        {/* Winner */}
+        {winner&&showdown&&(
+          <div style={{position:"absolute",top:"18%",left:"50%",transform:"translate(-50%,-50%)",
+            zIndex:20,background:"rgba(0,0,0,0.95)",borderRadius:10,padding:"7px 18px",
+            border:"2px solid #ffd700",textAlign:"center"}}>
+            <div style={{color:"#ffd700",fontSize:15,fontWeight:"bold"}}>🏆 {winner.name} wins!</div>
+            {winner.handEval&&<div style={{color:"#aaa",fontSize:11}}>{winner.handEval.name}</div>}
+          </div>
+        )}
+
+        {/* Player seats — positions as % of container height/width */}
+        {gs.players.map((player,i)=>{
+          const s=SEATS[i];
+          // Convert % positions into absolute using paddingTop trick within relative container
+          return(
+            <div key={i} style={{position:"absolute",top:s.top,left:s.left,
+              transform:"translate(-50%,-50%)",zIndex:5}}>
+              {player.currentBet>0&&(
+                <div style={{position:"absolute",top:s.ct,left:s.cl,right:s.cr,
+                  transform:s.ctr,zIndex:6,pointerEvents:"none"}}>
+                  <ChipStack amount={player.currentBet}/>
+                </div>
+              )}
+              <PlayerSeat player={player} isUser={player.isUser}
+                isActive={phase==="playing"&&gs.activeIdx===i&&!player.folded}
+                isDealer={i===gs.dealerIdx} isSB={i===gs.sbIdx} isBB={i===gs.bbIdx}
+                showCards={showdown||player.isUser} lastAction={lastActions[i]}/>
+              {thinkingId===player.id&&(
+                <div style={{position:"absolute",top:-14,left:"50%",transform:"translateX(-50%)",
+                  background:"rgba(0,0,0,0.92)",borderRadius:5,padding:"1px 6px",
+                  color:"#ffd700",fontSize:9,whiteSpace:"nowrap",zIndex:20}}>thinking…</div>
+              )}
             </div>
-            {/* Row 1: main actions — tall, easy to tap */}
-            <div style={{display:"flex",gap:6,marginBottom:6}}>
+          );
+        })}
+      </div>
+
+      {/* ═══ BOTTOM 50%: CONTROLS ═══ */}
+      <div style={{height:"50%",display:"flex",flexDirection:"column",padding:"5px 12px 8px",
+        gap:5,overflowY:"auto",background:"rgba(0,0,0,0.3)",borderTop:"1px solid rgba(255,215,0,0.12)"}}>
+
+        {/* Action log */}
+        <div style={{background:"rgba(0,0,0,0.6)",borderRadius:8,padding:"5px 10px",
+          minHeight:46,maxHeight:62,overflowY:"auto",border:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+          {actionLog.slice(-3).map((l,i)=>(
+            <div key={i} style={{color:i===actionLog.slice(-3).length-1?"#eee":"#444",
+              fontSize:12,lineHeight:1.5,fontWeight:i===actionLog.slice(-3).length-1?"bold":"normal"}}>{l}</div>
+          ))}
+        </div>
+
+        {/* YOUR TURN */}
+        {isUserTurn&&phase==="playing"&&(
+          <div style={{background:"rgba(4,22,70,0.98)",borderRadius:12,padding:"8px 10px",
+            border:"2px solid #ffd700",boxShadow:"0 0 18px rgba(255,215,0,0.18)",flexShrink:0}}>
+            <div style={{color:"#ffd700",fontSize:13,fontWeight:"bold",marginBottom:6,
+              textAlign:"center"}}>♦ YOUR TURN {toCall>0?`— Call $${toCall}`:"— Check or Bet"} ♦</div>
+            {/* Row 1: Primary actions */}
+            <div style={{display:"flex",gap:5,marginBottom:5}}>
               <button onClick={()=>userAct("fold")}
-                style={{flex:1,background:"#7a0000",color:"#fff",border:"2px solid #ff5555",borderRadius:9,padding:"12px 0",fontWeight:"bold",fontSize:15,letterSpacing:0.5}}>
-                Fold
-              </button>
+                style={{flex:1,background:"#7a0000",color:"#fff",border:"2px solid #ff5555",
+                  borderRadius:9,padding:"11px 0",fontWeight:"bold",fontSize:15}}>Fold</button>
               {toCall===0
                 ?<button onClick={()=>userAct("check")}
-                    style={{flex:2,background:"#0a4a0a",color:"#fff",border:"2px solid #55ff55",borderRadius:9,padding:"12px 0",fontWeight:"bold",fontSize:15}}>
-                    Check
-                  </button>
+                    style={{flex:2,background:"#0a4a0a",color:"#fff",border:"2px solid #55ff55",
+                      borderRadius:9,padding:"11px 0",fontWeight:"bold",fontSize:15}}>Check</button>
                 :<button onClick={()=>userAct("call")}
-                    style={{flex:2,background:"#083640",color:"#fff",border:"2px solid #44ddff",borderRadius:9,padding:"12px 0",fontWeight:"bold",fontSize:15}}>
-                    Call ${toCall}
-                  </button>
+                    style={{flex:2,background:"#083640",color:"#fff",border:"2px solid #44ddff",
+                      borderRadius:9,padding:"11px 0",fontWeight:"bold",fontSize:15}}>Call ${toCall}</button>
               }
               <button onClick={()=>userAct(toCall>0?"raise":"bet",user.chips)}
-                style={{flex:1,background:"#7a2200",color:"#fff",border:"2px solid #ff9944",borderRadius:9,padding:"12px 0",fontWeight:"bold",fontSize:14}}>
-                All-In
-              </button>
+                style={{flex:1,background:"#7a2200",color:"#fff",border:"2px solid #ff9944",
+                  borderRadius:9,padding:"11px 0",fontWeight:"bold",fontSize:14}}>All-In</button>
             </div>
-            {/* Row 2: Quick BB buttons */}
-            <div style={{display:"flex",gap:5,marginBottom:6}}>
+            {/* Row 2: BB multiples */}
+            <div style={{display:"flex",gap:4,marginBottom:5}}>
               {[3,4,5].map(mult=>{
                 const amt=Math.min(mult*2,user.chips);
-                return (
+                return(
                   <button key={mult}
                     onClick={()=>{setBetAmt(amt);userAct(toCall>0?"raise":"bet",amt);}}
-                    style={{flex:1,background:"rgba(255,215,0,0.14)",color:"#ffd700",border:"1px solid rgba(255,215,0,0.5)",borderRadius:8,padding:"7px 0",fontWeight:"bold",fontSize:13,lineHeight:1.3}}>
+                    style={{flex:1,background:"rgba(255,215,0,0.13)",color:"#ffd700",
+                      border:"1px solid rgba(255,215,0,0.45)",borderRadius:8,padding:"6px 0",
+                      fontWeight:"bold",fontSize:13,lineHeight:1.3}}>
                     {mult}×BB<br/><span style={{fontSize:11}}>${amt}</span>
                   </button>
                 );
               })}
             </div>
-            {/* Row 3: Slider + custom raise */}
-            <div style={{display:"flex",gap:7,alignItems:"center"}}>
+            {/* Row 3: Slider */}
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
               <span style={{color:"#ffd700",fontSize:12,minWidth:34,textAlign:"right",fontWeight:"bold"}}>${betAmt}</span>
               <input type="range"
-                min={Math.max((gs.currentBet*2)||4,toCall+2)}
-                max={Math.max(user.chips,1)}
-                step={1}
-                value={betAmt}
-                onChange={e=>setBetAmt(Number(e.target.value))}
-                style={{flex:1,accentColor:"#ffd700",height:28}}/>
+                min={Math.max((gs.currentBet*2)||4,toCall+2)} max={Math.max(user.chips,1)}
+                step={1} value={betAmt} onChange={e=>setBetAmt(Number(e.target.value))}
+                style={{flex:1,accentColor:"#ffd700"}}/>
               <button onClick={()=>userAct(toCall>0?"raise":"bet",betAmt)}
-                style={{background:"#4a0870",color:"#fff",border:"2px solid #cc55ff",borderRadius:9,padding:"10px 12px",fontWeight:"bold",fontSize:13,whiteSpace:"nowrap"}}>
+                style={{background:"#4a0870",color:"#fff",border:"2px solid #cc55ff",
+                  borderRadius:9,padding:"10px 10px",fontWeight:"bold",fontSize:13,whiteSpace:"nowrap"}}>
                 {toCall>0?`Raise $${betAmt}`:`Bet $${betAmt}`}
               </button>
             </div>
           </div>
         )}
 
-        {/* Waiting / thinking indicator */}
+        {/* Waiting */}
         {phase==="playing"&&!isUserTurn&&(
           <div style={{textAlign:"center",padding:"4px 0"}}>
             {thinkingId!=null
-              ? <span style={{color:"#ffd700",fontSize:13,opacity:0.6}}>{gs.players.find(p=>p.id===thinkingId)?.name} is thinking…</span>
-              : <span style={{color:"#444",fontSize:12}}>Waiting for action…</span>
-            }
+              ?<span style={{color:"#ffd700",fontSize:13,opacity:0.65}}>{gs.players.find(p=>p.id===thinkingId)?.name} is thinking…</span>
+              :<span style={{color:"#444",fontSize:12}}>Waiting…</span>}
           </div>
         )}
 
-        {/* Assessment panel */}
-        {phase==="assess"&&assessPlayer&&(
-          <div style={{background:"linear-gradient(160deg,#0a1a30,#081808)",borderRadius:12,padding:"9px 12px",border:"2px solid #ffd700",boxShadow:"0 0 20px rgba(0,0,0,0.8)"}}>
-            {/* Header */}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
-              <div>
-                <div style={{color:"#ffd700",fontSize:10,textTransform:"uppercase",letterSpacing:1}}>{assessPhase.toUpperCase()} READ — {assessIdx+1}/{assessQueue.length}</div>
-                <div style={{color:"#fff",fontSize:15,fontWeight:"bold"}}>{assessPlayer.emoji} {assessPlayer.name}</div>
-                <div style={{color:"#777",fontSize:10}}>{POS_SHORT[assessPlayer.id]}</div>
+        {/* ═══ ASSESSMENT PANEL ═══ */}
+        {phase==="assess"&&assessPlayer&&(()=>{
+          const opts=rangeOptions[assessPlayer.id]||[];
+          const ai=stageOrder.indexOf(assessPhase);
+          const timeline=[];
+          for(let si=0;si<=ai;si++){
+            const s=stageOrder[si];
+            const acts=(streetHist[s]||{})[assessPlayer.id]||[];
+            if(acts.length>0)timeline.push({s,acts});
+          }
+          const AC={Folds:"#e44",Checks:"#777",Calls:"#4af",Bets:"#fa0",Raises:"#f80"};
+          return(
+            <div style={{background:"linear-gradient(160deg,#0a1a32,#081808)",borderRadius:12,
+              padding:"8px 10px",border:"2px solid #ffd700",boxShadow:"0 0 20px rgba(0,0,0,0.8)"}}>
+              {/* Header */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                <div>
+                  <div style={{color:"#ffd700",fontSize:9,textTransform:"uppercase",letterSpacing:1}}>
+                    {assessPhase.toUpperCase()} — {assessIdx+1}/{assessQueue.length}
+                  </div>
+                  <div style={{color:"#fff",fontSize:15,fontWeight:"bold"}}>{assessPlayer.emoji} {assessPlayer.name}</div>
+                  <div style={{color:"#666",fontSize:9}}>{POS_SHORT[assessPlayer.id]}</div>
+                </div>
+                <div style={{display:"flex",gap:2,flexWrap:"wrap",justifyContent:"flex-end",maxWidth:200}}>
+                  {gs.community.map((c,i)=><Card key={i} card={c} small/>)}
+                </div>
               </div>
-              <div style={{display:"flex",gap:3,flexWrap:"wrap",justifyContent:"flex-end",maxWidth:185}}>
-                {gs.community.map((c,i)=><Card key={i} card={c} small/>)}
-              </div>
-            </div>
 
-            {/* Betting history */}
-            {(()=>{
-              const ai=stageOrder.indexOf(assessPhase);
-              const tl=[];
-              for(let si=0;si<=ai;si++){const s=stageOrder[si];const acts=(streetHist[s]||{})[assessPlayer.id]||[];if(acts.length>0)tl.push({s,acts});}
-              if(!tl.length) return null;
-              const AC={Folds:"#e44",Checks:"#888",Calls:"#4af",Bets:"#fa0",Raises:"#f80"};
-              return (
-                <div style={{background:"rgba(0,0,0,0.4)",borderRadius:7,padding:"5px 8px",marginBottom:7,border:"1px solid rgba(255,255,255,0.06)"}}>
-                  <div style={{color:"#ffd700",fontSize:9,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>Betting History</div>
-                  {tl.map(({s,acts})=>(
+              {/* Betting history */}
+              {timeline.length>0&&(
+                <div style={{background:"rgba(0,0,0,0.4)",borderRadius:7,padding:"4px 8px",
+                  marginBottom:7,border:"1px solid rgba(255,255,255,0.06)"}}>
+                  <div style={{color:"#ffd700",fontSize:8,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>Their Actions</div>
+                  {timeline.map(({s,acts})=>(
                     <div key={s} style={{marginBottom:2,display:"flex",alignItems:"center",flexWrap:"wrap",gap:3}}>
-                      <span style={{color:"#556",fontSize:9,textTransform:"uppercase",minWidth:28}}>{s.slice(0,3)}</span>
-                      {acts.map((a,i)=>{const col=AC[a.split(" ")[0]]||"#aaa";return <span key={i} style={{background:"rgba(255,255,255,0.06)",border:`1px solid ${col}55`,borderRadius:4,padding:"2px 7px",fontSize:11,color:col,fontWeight:"bold"}}>{a}</span>;})}
+                      <span style={{color:"#556",fontSize:8,textTransform:"uppercase",minWidth:26}}>{s.slice(0,3)}</span>
+                      {acts.map((a,i)=>{const col=AC[a.split(" ")[0]]||"#aaa";return(
+                        <span key={i} style={{background:"rgba(255,255,255,0.06)",border:`1px solid ${col}55`,
+                          borderRadius:4,padding:"2px 7px",fontSize:11,color:col,fontWeight:"bold"}}>{a}</span>
+                      );})}
                     </div>
                   ))}
                 </div>
-              );
-            })()}
+              )}
 
-            <div style={{color:"#999",fontSize:11,marginBottom:7}}>What two cards does <strong style={{color:"#fff"}}>{assessPlayer.name}</strong> hold?</div>
-
-            {/* Card pickers */}
-            <div style={{display:"flex",gap:20,justifyContent:"center",marginBottom:7,position:"relative"}}>
-              <CardPicker label="Card 1" selected={card1} onSelect={setCard1} usedCards={usedCards.filter(c=>c!==card1)}/>
-              <CardPicker label="Card 2" selected={card2} onSelect={setCard2} usedCards={usedCards.filter(c=>c!==card2)}/>
-            </div>
-            {card1&&card2&&(
-              <div style={{textAlign:"center",color:"#888",fontSize:11,marginBottom:7}}>
-                Makes: <strong style={{color:"#ffd700"}}>{handCategory([card1,card2],gs.community)}</strong>
+              <div style={{color:"#888",fontSize:11,marginBottom:6}}>
+                What range does <strong style={{color:"#ddd"}}>{assessPlayer.name}</strong> hold?
               </div>
-            )}
-            <div style={{display:"flex",gap:7}}>
-              <button onClick={submitGuess} disabled={!card1||!card2}
-                style={{flex:1,background:card1&&card2?"linear-gradient(135deg,#185818,#0a3a0a)":"rgba(255,255,255,0.04)",color:card1&&card2?"#ffd700":"#444",border:card1&&card2?"2px solid #ffd700":"2px solid #333",borderRadius:9,padding:"11px",fontWeight:"bold",fontSize:14,fontFamily:"Georgia,serif"}}>
-                Lock In →
-              </button>
+
+              {/* Range option buttons — 3 big tappable buttons */}
+              <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:5}}>
+                {opts.map(opt=>(
+                  <button key={opt.id} onClick={()=>submitGuess(opt.id)}
+                    style={{background:"rgba(255,255,255,0.05)",color:"#fff",
+                      border:"1px solid rgba(255,215,0,0.3)",borderRadius:9,
+                      padding:"9px 12px",textAlign:"left",fontSize:13,fontWeight:"bold",
+                      display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:18}}>{opt.emoji}</span>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:"bold",color:"#fff"}}>{opt.label}</div>
+                      <div style={{fontSize:10,color:"#888",fontWeight:"normal"}}>{opt.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
               <button onClick={skipAssess}
-                style={{background:"transparent",color:"#555",border:"1px solid #333",borderRadius:9,padding:"11px 14px",fontSize:11}}>
-                Skip
-              </button>
+                style={{background:"transparent",color:"#444",border:"1px solid #333",
+                  borderRadius:8,padding:"7px",fontSize:11,width:"100%"}}>Skip all</button>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
+      {/* Results overlay */}
       {phase==="results"&&assessResults&&(
-        <ResultsScreen results={assessResults} gs={gs} winner={winner} onNew={initGame}/>
+        <ResultsScreen data={assessResults} gs={gs} winner={winner} userPos={userPos} onNew={initGame}/>
       )}
     </div>
   );
 }
 
-// ─── RESULTS SCREEN ──────────────────────────────────────────────────────────
-function ResultsScreen({results,gs,winner,onNew}) {
-  const exact=results.filter(r=>r.exact).length;
-  const approx=results.filter(r=>r.approx).length;
+// ═══════════════════════════════════════════════════════════════
+// RESULTS SCREEN
+// ═══════════════════════════════════════════════════════════════
+function ResultsScreen({data,gs,winner,userPos,onNew}){
+  const{results,feedback}=data;
+  const[tab,setTab]=useState("reads"); // "reads" | "feedback"
+  const correct=results.filter(r=>r.correct).length;
   const total=results.length;
-  const score=total>0?Math.round((exact+approx*0.5)/total*100):0;
+  const score=total>0?Math.round(correct/total*100):0;
   const stages=["preflop","flop","turn","river","final"];
-  const byStage={};
-  for (const r of results){if(!byStage[r.stg])byStage[r.stg]=[];byStage[r.stg].push(r);}
+  const byStage={};for(const r of results){if(!byStage[r.stg])byStage[r.stg]=[];byStage[r.stg].push(r);}
 
-  function MiniCard({c}) {
-    if (!c) return <span style={{color:"#333"}}>?</span>;
-    const red=c.suit==="♥"||c.suit==="♦";
-    return <span style={{background:"white",borderRadius:4,padding:"1px 5px",fontSize:11,fontWeight:"bold",color:red?"#c00":"#111",border:"1px solid #ccc",margin:"0 1px"}}>{c.rank}{c.suit}</span>;
-  }
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.96)",zIndex:300,overflowY:"auto",padding:12,display:"flex",alignItems:"flex-start",justifyContent:"center"}}>
-      <div style={{background:"linear-gradient(160deg,#0b1830,#081908)",borderRadius:16,padding:"18px 16px",border:"2px solid #ffd700",maxWidth:500,width:"100%",fontFamily:"Georgia,serif",marginTop:8}}>
-        <div style={{textAlign:"center",marginBottom:14}}>
-          <div style={{fontSize:36}}>🃏</div>
-          <div style={{color:"#ffd700",fontSize:20,fontWeight:"bold"}}>Hand Complete</div>
-          {winner&&<div style={{color:"#7dff7d",fontSize:13}}>🏆 {winner.name} takes the pot</div>}
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.97)",zIndex:300,
+      display:"flex",flexDirection:"column",fontFamily:"Georgia,serif"}}>
+      {/* Header */}
+      <div style={{background:"linear-gradient(160deg,#0b1830,#081908)",padding:"14px 16px",
+        borderBottom:"2px solid #ffd700",flexShrink:0}}>
+        <div style={{textAlign:"center",marginBottom:8}}>
+          <div style={{color:"#ffd700",fontSize:20,fontWeight:"bold"}}>🃏 Hand Complete</div>
+          {winner&&<div style={{color:"#7dff7d",fontSize:12}}>🏆 {winner.name} takes the pot</div>}
         </div>
-
-        <div style={{background:"rgba(255,215,0,0.07)",borderRadius:10,padding:12,textAlign:"center",marginBottom:14,border:"1px solid rgba(255,215,0,0.2)"}}>
-          <div style={{color:"#ffd700",fontSize:32,fontWeight:"bold"}}>{score}%</div>
-          <div style={{color:"#888",fontSize:11}}>{exact} exact · {approx} rank match · {total} reads</div>
-          <div style={{color:score>=70?"#7dff7d":score>=40?"#ffd700":"#f66",fontSize:12,marginTop:3}}>
-            {score>=70?"Sharp reads! 🎯":score>=40?"Good effort — study those bet sizes 📚":"Keep tracking betting patterns 🔍"}
+        {/* Score */}
+        <div style={{background:"rgba(255,215,0,0.07)",borderRadius:10,padding:"8px 12px",
+          textAlign:"center",border:"1px solid rgba(255,215,0,0.2)",marginBottom:8}}>
+          <div style={{color:"#ffd700",fontSize:28,fontWeight:"bold"}}>{score}%</div>
+          <div style={{color:"#777",fontSize:10}}>{correct}/{total} correct reads</div>
+          <div style={{color:score>=70?"#7dff7d":score>=40?"#ffd700":"#f66",fontSize:11,marginTop:2}}>
+            {score>=70?"Excellent reads! 🎯":score>=40?"Keep studying those betting lines 📚":"Focus on bet sizing tells 🔍"}
           </div>
         </div>
-
-        {/* Showdown */}
-        <div style={{marginBottom:14}}>
-          <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Showdown</div>
-          {gs.players.filter(p=>!p.folded).map(p=>{
-            const ev=p.handEval||(gs.community.length>0?evaluateHand([...p.holeCards,...gs.community]):null);
-            return (
-              <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
-                <span style={{fontSize:14}}>{p.emoji}</span>
-                <span style={{color:"#fff",fontSize:12,minWidth:52}}>{p.name}</span>
-                <div style={{display:"flex",gap:2}}>{p.holeCards.map((c,i)=><Card key={i} card={c} small/>)}</div>
-                <span style={{color:"#777",fontSize:11,flex:1}}>{ev?.name||"?"}</span>
-                {winner?.id===p.id&&<span style={{color:"#ffd700",fontSize:11}}>🏆</span>}
-              </div>
-            );
-          })}
+        {/* Tab switcher */}
+        <div style={{display:"flex",gap:4}}>
+          {["reads","feedback"].map(t=>(
+            <button key={t} onClick={()=>setTab(t)}
+              style={{flex:1,background:tab===t?"#ffd700":"rgba(255,255,255,0.06)",
+                color:tab===t?"#000":"#888",border:tab===t?"2px solid #ffd700":"2px solid #333",
+                borderRadius:8,padding:"7px",fontSize:12,fontWeight:"bold",fontFamily:"Georgia,serif"}}>
+              {t==="reads"?"👁 Your Reads":"💬 Your Play"}
+            </button>
+          ))}
         </div>
+      </div>
 
-        {/* Assessment breakdown */}
-        {results.length>0&&(
-          <div style={{marginBottom:14}}>
-            <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Your Reads</div>
-            {stages.filter(s=>byStage[s]).map(stg=>(
-              <div key={stg} style={{marginBottom:8}}>
-                <div style={{color:"#666",fontSize:10,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>{stg}</div>
-                {byStage[stg].map((r,i)=>(
-                  <div key={i} style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap",padding:"5px 8px",borderRadius:7,marginBottom:2,background:r.exact?"rgba(0,160,0,0.12)":r.approx?"rgba(255,170,0,0.09)":"rgba(160,0,0,0.09)"}}>
-                    <span style={{fontSize:14}}>{r.exact?"✅":r.approx?"🟡":"❌"}</span>
-                    <span style={{color:"#bbb",fontSize:11,minWidth:40}}>{r.playerName}</span>
-                    <span style={{color:"#555",fontSize:10}}>guess:</span>
-                    <MiniCard c={r.guess?.card1}/><MiniCard c={r.guess?.card2}/>
-                    <span style={{color:"#444",fontSize:10}}>actual:</span>
-                    <MiniCard c={r.a1}/><MiniCard c={r.a2}/>
-                    {r.exact&&<span style={{color:"#7dff7d",fontSize:10}}>Exact!</span>}
-                    {r.approx&&<span style={{color:"#ffd700",fontSize:10}}>Ranks ✓</span>}
+      {/* Content */}
+      <div style={{flex:1,overflowY:"auto",padding:"12px 14px"}}>
+
+        {tab==="reads"&&(
+          <div>
+            {/* Showdown */}
+            <div style={{marginBottom:14}}>
+              <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Showdown</div>
+              {gs.players.filter(p=>!p.folded).map(p=>{
+                const ev=p.handEval||(gs.community.length>0?evaluateHand([...p.holeCards,...gs.community]):null);
+                const rangeId=classifyHoleCards(p.holeCards);
+                const rangeDef=HAND_RANGES.find(r=>r.id===rangeId);
+                return(
+                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 0",
+                    borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+                    <span style={{fontSize:13}}>{p.emoji}</span>
+                    <span style={{color:"#fff",fontSize:11,minWidth:50}}>{p.name}</span>
+                    <div style={{display:"flex",gap:2}}>{p.holeCards.map((c,i)=><Card key={i} card={c} small/>)}</div>
+                    <div style={{flex:1}}>
+                      <div style={{color:"#888",fontSize:9}}>{ev?.name||"?"}</div>
+                      <div style={{color:"#ffd700",fontSize:9}}>{rangeDef?.emoji} {rangeDef?.label}</div>
+                    </div>
+                    {winner?.id===p.id&&<span style={{color:"#ffd700",fontSize:11}}>🏆</span>}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Assessment results */}
+            {results.length>0&&(
+              <div>
+                <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Your Range Reads</div>
+                {stages.filter(s=>byStage[s]).map(stg=>(
+                  <div key={stg} style={{marginBottom:10}}>
+                    <div style={{color:"#555",fontSize:9,textTransform:"uppercase",letterSpacing:1,marginBottom:3}}>{stg}</div>
+                    {byStage[stg].map((r,i)=>{
+                      const guessedDef=HAND_RANGES.find(h=>h.id===r.chosenId);
+                      const correctDef=HAND_RANGES.find(h=>h.id===r.correctId);
+                      return(
+                        <div key={i} style={{padding:"6px 8px",borderRadius:8,marginBottom:3,
+                          background:r.correct?"rgba(0,160,0,0.14)":"rgba(160,0,0,0.12)"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:r.correct?0:3}}>
+                            <span style={{fontSize:13}}>{r.correct?"✅":"❌"}</span>
+                            <span style={{color:"#bbb",fontSize:11}}>{r.playerEmoji} {r.playerName}</span>
+                          </div>
+                          {!r.correct&&(
+                            <div style={{paddingLeft:20}}>
+                              <div style={{color:"#f88",fontSize:10}}>You said: {guessedDef?.emoji} {guessedDef?.label}</div>
+                              <div style={{color:"#7dff7d",fontSize:10}}>Actually: {correctDef?.emoji} {correctDef?.label} ({r.holeCards.map(c=>c.rank+c.suit).join('')})</div>
+                            </div>
+                          )}
+                          {r.correct&&<div style={{color:"#aaa",fontSize:10,paddingLeft:20}}>{guessedDef?.label} ✓ ({r.holeCards.map(c=>c.rank+c.suit).join('')})</div>}
+                        </div>
+                      );
+                    })}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab==="feedback"&&(
+          <div>
+            <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>
+              Your Betting Analysis
+            </div>
+            {feedback.map((f,i)=>(
+              <div key={i} style={{background:f.type==="good"?"rgba(0,160,0,0.12)":f.type==="warn"?"rgba(200,120,0,0.12)":"rgba(0,100,200,0.12)",
+                borderRadius:9,padding:"9px 12px",marginBottom:7,
+                borderLeft:`3px solid ${f.type==="good"?"#40c060":f.type==="warn"?"#f80":"#4af"}`}}>
+                <span style={{fontSize:14,marginRight:6}}>{f.icon}</span>
+                <span style={{color:"#ddd",fontSize:12,lineHeight:1.5}}>{f.msg}</span>
               </div>
             ))}
           </div>
         )}
+      </div>
 
-        <button onClick={onNew} style={{width:"100%",background:"linear-gradient(135deg,#185818,#0a3a0a)",color:"#ffd700",border:"2px solid #ffd700",borderRadius:10,padding:14,fontSize:15,fontWeight:"bold",fontFamily:"Georgia,serif",letterSpacing:1,boxShadow:"0 0 16px rgba(255,215,0,0.12)"}}>
+      {/* New hand button */}
+      <div style={{padding:"10px 14px",flexShrink:0,borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+        <button onClick={onNew}
+          style={{width:"100%",background:"linear-gradient(135deg,#185818,#0a3a0a)",
+            color:"#ffd700",border:"2px solid #ffd700",borderRadius:11,padding:14,
+            fontSize:15,fontWeight:"bold",fontFamily:"Georgia,serif",letterSpacing:1,
+            boxShadow:"0 0 16px rgba(255,215,0,0.12)"}}>
           Deal New Hand ♠
         </button>
       </div>
@@ -1013,33 +1123,42 @@ function ResultsScreen({results,gs,winner,onNew}) {
   );
 }
 
-// ─── START SCREEN ─────────────────────────────────────────────────────────────
-function StartScreen({onStart,pos,setPos}) {
-  return (
-    <div style={{minHeight:"100dvh",background:"radial-gradient(ellipse at center,#0a2a10 0%,#050f1e 100%)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"Georgia,serif",padding:20,overflowY:"auto"}}>
-      <div style={{textAlign:"center",maxWidth:460,width:"100%"}}>
-        <div style={{fontSize:48,marginBottom:4}}>♠️🃏♥️</div>
-        <h1 style={{color:"#ffd700",fontSize:26,fontWeight:"bold",margin:"0 0 8px",textShadow:"0 0 16px rgba(255,215,0,0.4)"}}>POKER HAND READER</h1>
+// ═══════════════════════════════════════════════════════════════
+// START SCREEN
+// ═══════════════════════════════════════════════════════════════
+function StartScreen({onStart,pos,setPos}){
+  return(
+    <div style={{height:"100dvh",background:"radial-gradient(ellipse at center,#0a2a10 0%,#050f1e 100%)",
+      display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+      fontFamily:"Georgia,serif",padding:20,overflowY:"auto"}}>
+      <div style={{textAlign:"center",maxWidth:440,width:"100%"}}>
+        <div style={{fontSize:46,marginBottom:4}}>♠️🃏♥️</div>
+        <h1 style={{color:"#ffd700",fontSize:26,fontWeight:"bold",margin:"0 0 6px",
+          textShadow:"0 0 16px rgba(255,215,0,0.4)"}}>POKER HAND READER</h1>
         <p style={{color:"#888",fontSize:13,margin:"0 0 18px",lineHeight:1.7}}>
-          Watch the action. Study the bets.<br/>Guess the exact two cards each opponent holds.
+          Watch the betting. Read the range.<br/>Get feedback on your own play.
         </p>
-
-        <div style={{background:"rgba(0,0,0,0.4)",borderRadius:12,padding:14,border:"1px solid rgba(255,215,0,0.15)",marginBottom:14}}>
-          <div style={{color:"#ffd700",fontSize:11,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>Choose Your Seat</div>
+        <div style={{background:"rgba(0,0,0,0.4)",borderRadius:12,padding:14,
+          border:"1px solid rgba(255,215,0,0.15)",marginBottom:14}}>
+          <div style={{color:"#ffd700",fontSize:11,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>Your Seat</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"}}>
             {POS_NAMES.map((p,i)=>(
-              <button key={i} onClick={()=>setPos(i)} style={{background:pos===i?"#ffd700":"rgba(255,255,255,0.05)",color:pos===i?"#000":"#888",border:pos===i?"2px solid #ffd700":"2px solid rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:pos===i?"bold":"normal",fontFamily:"Georgia,serif"}}>{p}</button>
+              <button key={i} onClick={()=>setPos(i)}
+                style={{background:pos===i?"#ffd700":"rgba(255,255,255,0.05)",
+                  color:pos===i?"#000":"#888",
+                  border:pos===i?"2px solid #ffd700":"2px solid rgba(255,255,255,0.08)",
+                  borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:pos===i?"bold":"normal",
+                  fontFamily:"Georgia,serif"}}>{p}</button>
             ))}
           </div>
         </div>
-
-        <div style={{background:"rgba(0,0,0,0.3)",borderRadius:12,padding:13,border:"1px solid rgba(255,255,255,0.04)",marginBottom:14,textAlign:"left"}}>
+        <div style={{background:"rgba(0,0,0,0.3)",borderRadius:12,padding:12,
+          border:"1px solid rgba(255,255,255,0.04)",marginBottom:16,textAlign:"left"}}>
           <div style={{color:"#ffd700",fontSize:11,marginBottom:7,textTransform:"uppercase",letterSpacing:1}}>How It Works</div>
-          {["Play normally — fold, call, bet, raise, or go all-in.",
-            "After each street, guess the exact hole cards each opponent holds.",
-            "Tap a card slot → pick rank → pick suit.",
-            "Exact match = full credit · Correct ranks = partial.",
-            "See your read accuracy at the end of each hand."
+          {["Play normally — fold, call, raise, or go all-in.",
+            "After each betting round, pick the range type you think each opponent holds.",
+            "Choose from: Premium Pair, Suited Connectors, Broadway, Weak Ace etc.",
+            "At showdown, see your read accuracy and feedback on your own bets.",
           ].map((t,i)=>(
             <div key={i} style={{display:"flex",gap:8,marginBottom:5}}>
               <span style={{color:"#ffd700",fontSize:11,minWidth:14}}>{i+1}.</span>
@@ -1047,8 +1166,11 @@ function StartScreen({onStart,pos,setPos}) {
             </div>
           ))}
         </div>
-
-        <button onClick={onStart} style={{width:"100%",background:"linear-gradient(135deg,#185818,#0a3a0a)",color:"#ffd700",border:"2px solid #ffd700",borderRadius:12,padding:15,fontSize:16,fontWeight:"bold",letterSpacing:2,fontFamily:"Georgia,serif",boxShadow:"0 0 24px rgba(255,215,0,0.18)"}}>
+        <button onClick={onStart}
+          style={{width:"100%",background:"linear-gradient(135deg,#185818,#0a3a0a)",
+            color:"#ffd700",border:"2px solid #ffd700",borderRadius:12,padding:15,
+            fontSize:16,fontWeight:"bold",letterSpacing:2,fontFamily:"Georgia,serif",
+            boxShadow:"0 0 24px rgba(255,215,0,0.18)"}}>
           DEAL CARDS ♠
         </button>
         <div style={{color:"#2a2a2a",fontSize:9,marginTop:10}}>$1/$2 No-Limit Hold'em · 8-handed · $200 stacks</div>
@@ -1057,7 +1179,7 @@ function StartScreen({onStart,pos,setPos}) {
   );
 }
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
+const root=ReactDOM.createRoot(document.getElementById('root'));
 root.render(React.createElement(PokerTrainer));
 </script>
 </body>
