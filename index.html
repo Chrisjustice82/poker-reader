@@ -195,9 +195,83 @@ function postFlopStr(hole,community){
 }
 
 // ═══════════════════════════════════════════════════════════════
+// BOARD TEXTURE + EQUITY-AWARE BET SIZING
+// ═══════════════════════════════════════════════════════════════
+
+// Returns 0 (dry) → 1 (very wet) based on connectivity & flush potential
+function boardWetness(community){
+  if(!community||community.length===0) return 0.5;
+  const vals=community.map(c=>RV[c.rank]).sort((a,b)=>a-b);
+  const suits=community.map(c=>c.suit);
+  // Flush draw potential: any suit appearing 2+ times on flop = wet
+  const sc={};for(const s of suits)sc[s]=(sc[s]||0)+1;
+  const flushThreat=Object.values(sc).some(n=>n>=2)?0.35:0;
+  // Straight potential: how close are cards?
+  let connScore=0;
+  for(let i=0;i<vals.length-1;i++){const gap=vals[i+1]-vals[i];if(gap<=2)connScore+=0.2;}
+  // Paired board = drier
+  const paired=Object.keys(sc).length<suits.length;
+  const pairPenalty=paired?-0.1:0;
+  return Math.max(0,Math.min(1,flushThreat+connScore+pairPenalty));
+}
+
+// Given hand equity and board/situation context, return optimal bet fraction of pot.
+// Returns a fraction 0.25–1.30 representing % of pot to bet.
+function optimalBetFrac(equity, community, purpose, spr){
+  // purpose: "value" | "cbet" | "bluff" | "protection"
+  const wet=boardWetness(community);
+  const stage=community.length===3?"flop":community.length===4?"turn":"river";
+
+  if(purpose==="value"){
+    // High equity + wet board = charge draws = bet big
+    // High equity + dry board = smaller to keep calls in
+    if(equity>=0.80){
+      return wet>0.6 ? 0.75 : 0.55; // nuts on wet = 75%, dry = 55%
+    }
+    if(equity>=0.65){
+      return wet>0.5 ? 0.65 : 0.45;
+    }
+    return 0.50; // medium value
+  }
+
+  if(purpose==="protection"){
+    // Vulnerable medium hand: small bet to deny equity cheaply
+    // e.g. top pair on wet board — don't bloat pot out of position
+    return wet>0.6 ? 0.40 : 0.30;
+  }
+
+  if(purpose==="cbet"){
+    // Continuation bet frequency and size varies by board and street
+    if(stage==="flop"){
+      // Dry board: bet small and often (range bet)
+      // Wet board: bet larger to charge draws
+      return wet>0.6 ? 0.65 : 0.33;
+    }
+    if(stage==="turn") return wet>0.5 ? 0.70 : 0.55;
+    return 0.70; // river c-bet is polarised
+  }
+
+  if(purpose==="bluff"){
+    // Pure bluff: need enough to make opponent fold
+    // River: polarised overbet or give up
+    if(stage==="river") return 0.85;
+    // Wet board semi-bluff: charge them
+    return wet>0.5 ? 0.65 : 0.50;
+  }
+
+  return 0.55; // default
+}
+
+// Classify what type of bet the AI should make given equity
+function classifyBetPurpose(equity, community, hasDraws){
+  if(equity>=0.72) return "value";
+  if(equity>=0.45) return hasDraws?"cbet":"protection";
+  if(equity>=0.28) return "bluff"; // semi-bluff with draws
+  return "bluff"; // pure bluff territory
+}
+
+// ═══════════════════════════════════════════════════════════════
 // AI — REALISTIC DECISION ENGINE
-// Represents live low/mid-stakes player tendencies per position.
-// Each player is one of: TAG, LAG, Calling Station, Nit, Rec, GTO-ish
 // ═══════════════════════════════════════════════════════════════
 const AI_PROFILES=[
   {name:"Rocky", emoji:"🪨",style:"Tight-Aggressive", pfr:0.16,vpip:0.18,cbet:0.72,foldCbet:0.50,bluff:0.18,aggPost:0.62},
@@ -292,78 +366,107 @@ function aiDecide(posIdx, prof, hole, community, pot, toCall, myChips, stage, wa
   const str=postFlopStr(hole,community);
   const eff=Math.max(0,Math.min(1,str+r));
   const po=toCall>0?toCall/(pot+toCall):0;
+  const wet=boardWetness(community);
   const isEarly=posIdx<=3;
   const isLate=posIdx>=6;
-  // position-adjusted call threshold
-  const callThr=isEarly?po+0.10:isLate?po+0.02:po+0.06;
-  // c-bet sizing: 50-75% pot depending on street
-  const cbetFrac=stage==="flop"?0.55:stage==="turn"?0.65:0.75;
-  const betSz=Math.max(2,Math.floor(pot*cbetFrac));
+  const spr=pot>0?myChips/pot:12;
+  const deep=spr>5;
 
+  // Detect draws in this hand
+  const all=[...hole,...community];
+  const sc2={};for(const c of all)sc2[c.suit]=(sc2[c.suit]||0)+1;
+  const hasDraw=Object.values(sc2).some(n=>n===4);
+
+  // ── FACING A BET ──
   if(toCall>0){
+    // Pot odds tells us the minimum equity needed to call profitably
+    // po = toCall / (pot + toCall)
+    // We need equity > po to call (positive EV)
+
     // Very strong: raise for value
     if(eff>=0.78){
-      if(deep&&Math.random()<(isLate?0.50:0.32)){
-        return{action:"raise",amount:Math.min(Math.floor(toCall*2.8),myChips)};
+      if(deep&&Math.random()<(isLate?0.48:0.30)){
+        const rsz=Math.floor(toCall*2.8);
+        return{action:"raise",amount:Math.min(rsz,myChips)};
       }
       return{action:"call"};
     }
-    // Good hand with equity: call
-    if(eff>callThr) return{action:"call"};
-    // Drawing hand: semi-bluff raise from late
-    if(eff>po&&isLate&&Math.random()<prof.bluff*0.6){
-      return{action:"raise",amount:Math.min(Math.floor(toCall*2.4),myChips)};
+
+    // Semi-bluff raise: strong draw + late position
+    if(hasDraw&&eff>0.40&&isLate&&Math.random()<prof.bluff*0.7){
+      const rsz=Math.floor(toCall*2.5);
+      return{action:"raise",amount:Math.min(rsz,myChips)};
     }
-    // Calling station always calls with anything decent
-    if(prof.style==="Calling Station"&&eff>0.18&&Math.random()<0.62) return{action:"call"};
-    // BB defends wide
-    if(posIdx===1&&eff>0.20&&Math.random()<0.48) return{action:"call"};
-    if(eff>po) return{action:"call"};
+
+    // Standard call if equity beats pot odds (with position adjustment)
+    const callBuffer=isEarly?0.08:isLate?0.01:0.05;
+    if(eff>po+callBuffer) return{action:"call"};
+
+    // Calling station ignores pot odds on marginal hands
+    if(prof.style==="Calling Station"&&eff>0.15&&Math.random()<0.65) return{action:"call"};
+    // BB defends wide to single bets
+    if(posIdx===1&&eff>0.18&&Math.random()<0.50) return{action:"call"};
+
+    // If equity barely covers pot odds, call anyway (implied odds)
+    if(eff>po*0.85&&hasDraw&&deep) return{action:"call"};
+
     return{action:"fold"};
   }
 
-  // First to act or checked to — no bet facing
-  // C-bet if was preflop raiser
-  if(wasPreFlopRaiser&&stage==="flop"){
-    if(eff>=0.40){
-      if(Math.random()<prof.cbet){
-        return{action:"bet",amount:Math.min(betSz,myChips)};
-      }
+  // ── NO BET FACING — first to act or checked to ──
+  const purpose=classifyBetPurpose(eff,community,hasDraw);
+  const betFrac=optimalBetFrac(eff,community,purpose,spr);
+  const betSz=Math.max(2,Math.floor(pot*betFrac));
+
+  // C-bet as preflop raiser
+  if(wasPreFlopRaiser&&community.length===3){
+    const cbetFrac=optimalBetFrac(eff,community,"cbet",spr);
+    const cbetSz=Math.max(2,Math.floor(pot*cbetFrac));
+    // Always c-bet strong hands; frequency-based for weaker
+    if(eff>=0.55&&Math.random()<prof.cbet){
+      return{action:"bet",amount:Math.min(cbetSz,myChips)};
     }
-    if(eff>=0.28&&Math.random()<prof.cbet*0.5){
-      return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.45)),myChips)};
+    if(eff>=0.30&&Math.random()<prof.cbet*0.55){
+      // Range c-bet small on dry boards
+      const smallSz=Math.max(2,Math.floor(pot*0.33));
+      return{action:"bet",amount:Math.min(smallSz,myChips)};
     }
   }
 
-  // Value betting by position
-  if(isEarly){
-    if(eff>=0.62){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*(stage==="river"?0.72:0.58))),myChips)};}
-    return{action:"check"};
+  // Double barrel (turn c-bet)
+  if(wasPreFlopRaiser&&community.length===4&&eff>=0.45){
+    if(Math.random()<prof.cbet*0.70){
+      const barrelFrac=optimalBetFrac(eff,community,"cbet",spr);
+      return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*barrelFrac)),myChips)};
+    }
   }
-  if(posIdx===4||posIdx===5){
-    if(eff>=0.55){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.60)),myChips)};}
-    if(eff>=0.36&&stage==="flop"&&Math.random()<0.38){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.48)),myChips)};}
-    if(eff>=0.36&&stage==="turn"&&Math.random()<prof.aggPost*0.5){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.55)),myChips)};}
-    return{action:"check"};
+
+  // Value bet with made hand — size depends on equity + wetness
+  if(eff>=0.62){
+    // Check-raise possibility: trap from early with monsters
+    if(isEarly&&eff>=0.82&&Math.random()<0.28) return{action:"check"};
+    return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*betFrac)),myChips)};
   }
-  if(posIdx===6){ // CO
-    if(eff>=0.50){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.62)),myChips)};}
-    if(Math.random()<prof.aggPost*0.55){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.50)),myChips)};}
-    return{action:"check"};
+
+  // Protection bet: vulnerable medium hands on wet boards
+  if(eff>=0.40&&wet>0.5&&purpose==="protection"){
+    if(Math.random()<prof.aggPost*0.60){
+      const protFrac=optimalBetFrac(eff,community,"protection",spr);
+      return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*protFrac)),myChips)};
+    }
   }
-  if(posIdx===7){ // BTN — most aggressive
-    if(eff>=0.44){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.65)),myChips)};}
-    if(Math.random()<prof.aggPost*0.65){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.52)),myChips)};}
-    return{action:"check"};
+
+  // Semi-bluff / probe bet from late position
+  if(isLate&&eff>=0.25&&Math.random()<prof.aggPost*0.50){
+    const bluffFrac=optimalBetFrac(eff,community,"bluff",spr);
+    return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*bluffFrac)),myChips)};
   }
-  if(posIdx===0){ // SB
-    if(eff>=0.64){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.60)),myChips)};}
-    return{action:"check"};
+
+  // Positional probe — CO/BTN bet medium draws
+  if(posIdx>=5&&hasDraw&&Math.random()<prof.aggPost*0.45){
+    return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.50)),myChips)};
   }
-  if(posIdx===1){ // BB
-    if(eff>=0.58){return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.58)),myChips)};}
-    return{action:"check"};
-  }
+
   return{action:"check"};
 }
 
@@ -768,14 +871,14 @@ function PokerTrainer(){
 
       {/* ═══ TOP 50%: TABLE ═══ */}
       <div style={{height:"50%",position:"relative",flexShrink:0}}>
-        {/* Felt oval */}
-        <div style={{position:"absolute",top:"4%",left:"2%",right:"2%",bottom:"4%",
+        {/* Felt oval — moved down 5% from top */}
+        <div style={{position:"absolute",top:"9%",left:"2%",right:"2%",bottom:"1%",
           background:"radial-gradient(ellipse at center,#1c6030 0%,#0e3d1a 60%,#07230f 100%)",
           borderRadius:"50%",border:"8px solid #2a1500",
           boxShadow:"0 0 0 3px #160b00,0 0 30px rgba(0,0,0,0.9),inset 0 0 30px rgba(0,0,0,0.3)"}}/>
 
         {/* Community cards */}
-        <div style={{position:"absolute",top:"36%",left:"50%",transform:"translate(-50%,-50%)",
+        <div style={{position:"absolute",top:"42%",left:"50%",transform:"translate(-50%,-50%)",
           display:"flex",gap:3,zIndex:4}}>
           {gs.community.map((c,i)=><Card key={i} card={c}/>)}
           {Array(5-gs.community.length).fill(0).map((_,i)=>(
@@ -784,7 +887,7 @@ function PokerTrainer(){
         </div>
 
         {/* Pot + stage */}
-        <div style={{position:"absolute",top:"60%",left:"50%",transform:"translate(-50%,-50%)",zIndex:4}}>
+        <div style={{position:"absolute",top:"65%",left:"50%",transform:"translate(-50%,-50%)",zIndex:4}}>
           <div style={{background:"rgba(0,0,0,0.85)",borderRadius:12,padding:"3px 14px",
             textAlign:"center",border:"1px solid rgba(255,215,0,0.3)"}}>
             <div style={{color:"#ffd700",fontWeight:"bold",fontSize:13}}>POT: ${gs.pot}</div>
@@ -794,7 +897,7 @@ function PokerTrainer(){
 
         {/* Winner */}
         {winner&&showdown&&(
-          <div style={{position:"absolute",top:"18%",left:"50%",transform:"translate(-50%,-50%)",
+          <div style={{position:"absolute",top:"25%",left:"50%",transform:"translate(-50%,-50%)",
             zIndex:20,background:"rgba(0,0,0,0.95)",borderRadius:10,padding:"7px 18px",
             border:"2px solid #ffd700",textAlign:"center"}}>
             <div style={{color:"#ffd700",fontSize:15,fontWeight:"bold"}}>🏆 {winner.name} wins!</div>
@@ -802,10 +905,9 @@ function PokerTrainer(){
           </div>
         )}
 
-        {/* Player seats — positions as % of container height/width */}
+        {/* Player seats */}
         {gs.players.map((player,i)=>{
           const s=SEATS[i];
-          // Convert % positions into absolute using paddingTop trick within relative container
           return(
             <div key={i} style={{position:"absolute",top:s.top,left:s.left,
               transform:"translate(-50%,-50%)",zIndex:5}}>
@@ -848,6 +950,7 @@ function PokerTrainer(){
             border:"2px solid #ffd700",boxShadow:"0 0 18px rgba(255,215,0,0.18)",flexShrink:0}}>
             <div style={{color:"#ffd700",fontSize:13,fontWeight:"bold",marginBottom:6,
               textAlign:"center"}}>♦ YOUR TURN {toCall>0?`— Call $${toCall}`:"— Check or Bet"} ♦</div>
+
             {/* Row 1: Primary actions */}
             <div style={{display:"flex",gap:5,marginBottom:5}}>
               <button onClick={()=>userAct("fold")}
@@ -865,26 +968,68 @@ function PokerTrainer(){
                 style={{flex:1,background:"#7a2200",color:"#fff",border:"2px solid #ff9944",
                   borderRadius:9,padding:"11px 0",fontWeight:"bold",fontSize:14}}>All-In</button>
             </div>
-            {/* Row 2: BB multiples */}
-            <div style={{display:"flex",gap:4,marginBottom:5}}>
-              {[3,4,5].map(mult=>{
-                const amt=Math.min(mult*2,user.chips);
-                return(
-                  <button key={mult}
-                    onClick={()=>{setBetAmt(amt);userAct(toCall>0?"raise":"bet",amt);}}
-                    style={{flex:1,background:"rgba(255,215,0,0.13)",color:"#ffd700",
-                      border:"1px solid rgba(255,215,0,0.45)",borderRadius:8,padding:"6px 0",
-                      fontWeight:"bold",fontSize:13,lineHeight:1.3}}>
-                    {mult}×BB<br/><span style={{fontSize:11}}>${amt}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {/* Row 3: Slider */}
+
+            {/* Row 2: Context-sensitive quick size buttons */}
+            {gs.stage==="preflop"?(
+              // PREFLOP: open raises = BB multiples; re-raises = multiples of current bet
+              <div style={{display:"flex",gap:4,marginBottom:5}}>
+                {toCall<=2
+                  // No raise yet — show open raise sizes (2.5x, 3x, 4x BB)
+                  ? [2.5,3,4].map(mult=>{
+                      const BB=2;
+                      const amt=Math.min(Math.round(mult*BB),user.chips);
+                      return(
+                        <button key={mult}
+                          onClick={()=>{setBetAmt(amt);userAct("raise",amt);}}
+                          style={{flex:1,background:"rgba(255,215,0,0.13)",color:"#ffd700",
+                            border:"1px solid rgba(255,215,0,0.45)",borderRadius:8,padding:"6px 0",
+                            fontWeight:"bold",fontSize:12,lineHeight:1.3}}>
+                          {mult}×BB<br/><span style={{fontSize:10}}>${amt}</span>
+                        </button>
+                      );
+                    })
+                  // Facing a raise — show 3-bet sizes (3x, 4x, 5x the raise)
+                  : [3,4,5].map(mult=>{
+                      const amt=Math.min(Math.round(mult*gs.currentBet),user.chips);
+                      return(
+                        <button key={mult}
+                          onClick={()=>{setBetAmt(amt);userAct("raise",amt);}}
+                          style={{flex:1,background:"rgba(255,120,0,0.15)",color:"#ffa040",
+                            border:"1px solid rgba(255,140,0,0.5)",borderRadius:8,padding:"6px 0",
+                            fontWeight:"bold",fontSize:12,lineHeight:1.3}}>
+                          {mult}×Raise<br/><span style={{fontSize:10}}>${amt}</span>
+                        </button>
+                      );
+                    })
+                }
+              </div>
+            ):(
+              // POST-FLOP: pot-fraction buttons (1/3, 1/2, 2/3, pot)
+              <div style={{display:"flex",gap:4,marginBottom:5}}>
+                {[[1/3,"⅓"],[1/2,"½"],[2/3,"⅔"],[1,"POT"]].map(([frac,lbl])=>{
+                  const base=toCall>0?toCall*2:gs.pot; // if facing bet, min raise; else pot
+                  const amt=toCall>0
+                    ? Math.min(Math.max(Math.round(toCall*2),Math.round(toCall+gs.pot*frac)),user.chips)
+                    : Math.min(Math.max(2,Math.round(gs.pot*frac)),user.chips);
+                  return(
+                    <button key={lbl}
+                      onClick={()=>{setBetAmt(amt);userAct(toCall>0?"raise":"bet",amt);}}
+                      style={{flex:1,background:"rgba(255,215,0,0.11)",color:"#ffd700",
+                        border:"1px solid rgba(255,215,0,0.4)",borderRadius:8,padding:"6px 0",
+                        fontWeight:"bold",fontSize:12,lineHeight:1.3}}>
+                      {lbl}<br/><span style={{fontSize:10}}>${amt}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Row 3: Slider for custom sizing */}
             <div style={{display:"flex",gap:6,alignItems:"center"}}>
               <span style={{color:"#ffd700",fontSize:12,minWidth:34,textAlign:"right",fontWeight:"bold"}}>${betAmt}</span>
               <input type="range"
-                min={Math.max((gs.currentBet*2)||4,toCall+2)} max={Math.max(user.chips,1)}
+                min={toCall>0?Math.max(toCall*2,toCall+1):2}
+                max={Math.max(user.chips,1)}
                 step={1} value={betAmt} onChange={e=>setBetAmt(Number(e.target.value))}
                 style={{flex:1,accentColor:"#ffd700"}}/>
               <button onClick={()=>userAct(toCall>0?"raise":"bet",betAmt)}
@@ -1035,6 +1180,17 @@ function ResultsScreen({data,gs,winner,userPos,onNew}){
 
         {tab==="reads"&&(
           <div>
+            {/* Community cards at showdown */}
+            {gs.community.length>0&&(
+              <div style={{marginBottom:14}}>
+                <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:6,
+                  textTransform:"uppercase",letterSpacing:1}}>Board</div>
+                <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
+                  {gs.community.map((c,i)=><Card key={i} card={c}/>)}
+                </div>
+              </div>
+            )}
+
             {/* Showdown */}
             <div style={{marginBottom:14}}>
               <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Showdown</div>
@@ -1042,17 +1198,21 @@ function ResultsScreen({data,gs,winner,userPos,onNew}){
                 const ev=p.handEval||(gs.community.length>0?evaluateHand([...p.holeCards,...gs.community]):null);
                 const rangeId=classifyHoleCards(p.holeCards);
                 const rangeDef=HAND_RANGES.find(r=>r.id===rangeId);
+                const isWinner=winner?.id===p.id;
                 return(
-                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 0",
-                    borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+                  <div key={p.id} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 6px",
+                    marginBottom:3,borderRadius:8,
+                    background:isWinner?"rgba(255,215,0,0.08)":"rgba(255,255,255,0.02)",
+                    border:isWinner?"1px solid rgba(255,215,0,0.3)":"1px solid transparent"}}>
                     <span style={{fontSize:13}}>{p.emoji}</span>
-                    <span style={{color:"#fff",fontSize:11,minWidth:50}}>{p.name}</span>
+                    <span style={{color:isWinner?"#ffd700":"#fff",fontSize:11,minWidth:48,fontWeight:isWinner?"bold":"normal"}}>{p.name}</span>
+                    {/* Hole cards */}
                     <div style={{display:"flex",gap:2}}>{p.holeCards.map((c,i)=><Card key={i} card={c} small/>)}</div>
                     <div style={{flex:1}}>
-                      <div style={{color:"#888",fontSize:9}}>{ev?.name||"?"}</div>
-                      <div style={{color:"#ffd700",fontSize:9}}>{rangeDef?.emoji} {rangeDef?.label}</div>
+                      <div style={{color:isWinner?"#ffd700":"#888",fontSize:10,fontWeight:isWinner?"bold":"normal"}}>{ev?.name||"?"}</div>
+                      <div style={{color:"#666",fontSize:9}}>{rangeDef?.emoji} {rangeDef?.label}</div>
                     </div>
-                    {winner?.id===p.id&&<span style={{color:"#ffd700",fontSize:11}}>🏆</span>}
+                    {isWinner&&<span style={{color:"#ffd700",fontSize:13}}>🏆</span>}
                   </div>
                 );
               })}
