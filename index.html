@@ -10,7 +10,6 @@
 <meta name="application-name" content="Poker Reader">
 <meta name="theme-color" content="#060d18">
 <meta name="description" content="Texas Hold'em hand reading trainer">
-<link rel="manifest" href="data:application/json;charset=utf-8,%7B%22name%22%3A%22Poker%20Hand%20Reader%22%2C%22short_name%22%3A%22Poker%20Reader%22%2C%22description%22%3A%22Texas%20Hold'em%20hand%20reading%20trainer%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23060d18%22%2C%22theme_color%22%3A%22%23060d18%22%2C%22orientation%22%3A%22portrait%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%253D'http%253A%252F%252Fwww.w3.org%252F2000%252Fsvg'%2520viewBox%253D'0%25200%252096%252096'%253E%253Crect%2520width%253D'96'%2520height%253D'96'%2520fill%253D'%2523060d18'%2520rx%253D'18'%252F%253E%253Ctext%2520x%253D'48'%2520y%253D'68'%2520font-size%253D'60'%2520text-anchor%253D'middle'%253E%25E2%2599%25A0%253C%252Ftext%253E%253C%252Fsvg%253E%22%2C%22sizes%22%3A%22any%22%2C%22type%22%3A%22image%252Fsvg%2Bxml%22%7D%5D%7D">
 <title>Poker Hand Reader</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -33,6 +32,103 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(255,215,0,0.3); border-radius: 2px; }
 </style>
+
+<script>
+// ── PWA MANIFEST (injected as blob so it works from any origin including file://) ──
+(function() {
+  const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+    <rect width="512" height="512" rx="80" fill="#060d18"/>
+    <text x="256" y="340" font-size="320" text-anchor="middle" fill="#ffd700">♠</text>
+  </svg>`;
+  const iconUrl = 'data:image/svg+xml,' + encodeURIComponent(icon);
+
+  const manifest = {
+    name: "Poker Hand Reader",
+    short_name: "Poker Reader",
+    description: "Texas Hold'em hand reading trainer — read your opponents",
+    start_url: "./",
+    scope: "./",
+    display: "standalone",
+    orientation: "any",
+    background_color: "#060d18",
+    theme_color: "#060d18",
+    icons: [
+      { src: iconUrl, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }
+    ]
+  };
+
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = url;
+  document.head.appendChild(link);
+})();
+
+// ── SERVICE WORKER (inline blob) — enables true PWA install + offline ──
+// Chrome requires a SW with a fetch handler to show the "Install app" prompt.
+(function() {
+  if (!('serviceWorker' in navigator)) return;
+
+  const CACHE = 'poker-reader-v1';
+  const URLS = [
+    './',
+    'https://unpkg.com/react@18/umd/react.production.min.js',
+    'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
+    'https://unpkg.com/@babel/standalone/babel.min.js'
+  ];
+
+  const swCode = `
+const CACHE = '${CACHE}';
+const URLS = ${JSON.stringify(URLS)};
+
+// Install: pre-cache all assets
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open(CACHE).then(cache => {
+      return Promise.allSettled(URLS.map(url => cache.add(url)));
+    }).then(() => self.skipWaiting())
+  );
+});
+
+// Activate: remove old caches
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
+});
+
+// Fetch: cache-first for known assets, network-first for others
+self.addEventListener('fetch', e => {
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      if (cached) return cached;
+      return fetch(e.request).then(response => {
+        if (response && response.status === 200 && response.type !== 'opaque') {
+          const clone = response.clone();
+          caches.open(CACHE).then(cache => cache.put(e.request, clone));
+        }
+        return response;
+      }).catch(() => cached || new Response('Offline', { status: 503 }));
+    })
+  );
+});
+`;
+
+  const blob = new Blob([swCode], { type: 'application/javascript' });
+  const swUrl = URL.createObjectURL(blob);
+
+  navigator.serviceWorker.register(swUrl, { scope: './' })
+    .then(reg => {
+      console.log('[PWA] Service worker registered, scope:', reg.scope);
+    })
+    .catch(err => {
+      console.warn('[PWA] SW registration failed (expected on file://):', err.message);
+    });
+})();
+</script>
 </head>
 <body>
 <div id="root"></div>
