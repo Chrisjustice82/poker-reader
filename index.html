@@ -168,17 +168,25 @@ function preflopCat(hole){
   const H=hiCard(hole),L=loCard(hole);
   const pair=isPair(hole),suited=isSuited(hole),gap=H-L;
   if(pair&&H>=12) return "premium";
-  if(pair&&H>=8)  return "strong";
-  if(pair)        return "medium";
+  if(pair&&H>=9)  return "strong";
+  if(pair&&H>=6)  return "medium";
+  if(pair)        return "speculative";
   if(H===14&&L>=12) return "premium";
   if(H===14&&L>=10) return "strong";
-  if(H===14&&(suited||L>=7)) return "medium";
+  if(H===14&&suited) return "medium";
+  if(H===14&&L>=7)   return "medium";
+  if(H===14)         return "speculative";
   if(isBroadway(hole)&&suited) return "strong";
-  if(isBroadway(hole)) return "medium";
-  if(H>=11&&suited&&gap<=2) return "medium";
+  if(isBroadway(hole)&&gap<=1) return "medium";
+  if(isBroadway(hole)) return "speculative";
+  if(H>=10&&suited&&gap<=2) return "medium";
   if(H>=9&&suited&&gap<=2)  return "speculative";
-  if(H===14) return "speculative";
+  if(H>=9&&gap<=1)           return "speculative";
   return "trash";
+}
+
+function relativePos(seatIdx,dealerIdx){
+  return (seatIdx - dealerIdx + 8) % 8;
 }
 
 function postFlopStr(hole,community){
@@ -228,78 +236,85 @@ const AI_PROFILES=[
   {name:"Shark", emoji:"\uD83E\uDD88",style:"GTO-Balanced",     pfr:0.20,vpip:0.27,cbet:0.70,bluff:0.26,aggPost:0.68},
 ];
 
-function aiDecide(posIdx,prof,hole,community,pot,toCall,myChips,stage,wasPFR){
+function aiDecide(seatIdx,prof,hole,community,pot,toCall,myChips,stage,wasPFR,dealerIdx){
   const cat=preflopCat(hole);
   const spr=pot>0?myChips/pot:12;
   const deep=spr>5;
   const noise=(Math.random()-0.5)*0.08;
+  const rel=relativePos(seatIdx,dealerIdx);
 
   if(stage==="preflop"){
     const facing=toCall>2;
-    if(posIdx===1){
+    if(rel===2){
       if(!facing) return{action:"check"};
-      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3.2),myChips)};
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
       if(cat==="strong"||cat==="medium") return{action:"call"};
-      if(cat==="speculative"&&deep) return{action:"call"};
-      if(toCall<=8&&Math.random()<0.52) return{action:"call"};
+      if(cat==="speculative") return{action:"call"};
+      if(toCall<=8) return{action:"call"};
       return{action:"fold"};
     }
-    if(posIdx===0){
+    if(rel===1){
       if(!facing){
         if(cat==="premium") return{action:"raise",amount:6};
         if(cat==="strong")  return{action:"raise",amount:5};
         if(cat==="medium"||cat==="speculative") return{action:"call"};
+        if(Math.random()<0.30) return{action:"call"};
         return{action:"fold"};
       }
       if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
-      if(cat==="strong")  return{action:"call"};
-      if(cat==="medium"&&Math.random()<0.45) return{action:"call"};
+      if(cat==="strong"||cat==="medium") return{action:"call"};
+      if(cat==="speculative"&&Math.random()<0.40) return{action:"call"};
       return{action:"fold"};
     }
-    if(posIdx===2||posIdx===3){
+    if(rel===3||rel===4){
       if(!facing){
         if(cat==="premium"||cat==="strong") return{action:"raise",amount:6};
-        if(cat==="medium"&&Math.random()<0.50) return{action:"call"};
-        if(cat==="speculative"&&isSuited(hole)&&Math.random()<0.28) return{action:"call"};
-        return{action:"fold"};
-      }
-      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
-      if(cat==="strong"&&Math.random()<0.38) return{action:"call"};
-      return{action:"fold"};
-    }
-    if(posIdx===4||posIdx===5){
-      if(!facing){
-        if(cat==="premium"||cat==="strong") return{action:"raise",amount:6};
-        if(cat==="medium") return{action:Math.random()<0.55?"raise":"call",amount:6};
-        if(cat==="speculative"&&(isSuited(hole)||isConnected(hole))) return{action:"call"};
+        if(cat==="medium") return{action:Math.random()<0.60?"raise":"call",amount:6};
+        if(cat==="speculative"&&Math.random()<0.45) return{action:"call"};
         return{action:"fold"};
       }
       if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
       if(cat==="strong") return{action:"call"};
-      if(cat==="medium"&&Math.random()<0.50) return{action:"call"};
+      if(cat==="medium"&&Math.random()<0.40) return{action:"call"};
       return{action:"fold"};
     }
-    if(posIdx===6){
+    if(rel===5||rel===6){
       if(!facing){
-        if(cat==="trash"&&hiCard(hole)<7) return{action:"fold"};
-        if(cat==="trash"&&Math.random()<0.55) return{action:"fold"};
-        return{action:"raise",amount:6};
-      }
-      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3.2),myChips)};
-      if(cat==="strong"||cat==="medium") return{action:"call"};
-      if(cat==="speculative"&&isSuited(hole)) return{action:"call"};
-      return{action:"fold"};
-    }
-    if(posIdx===7){
-      if(!facing){
-        if(cat==="trash"&&hiCard(hole)<6) return{action:"fold"};
-        if(cat==="trash"&&Math.random()<0.38) return{action:"fold"};
-        return{action:"raise",amount:6};
+        if(cat==="premium"||cat==="strong") return{action:"raise",amount:6};
+        if(cat==="medium") return{action:Math.random()<0.65?"raise":"call",amount:6};
+        if(cat==="speculative") return{action:Math.random()<0.55?"call":"fold"};
+        return{action:"fold"};
       }
       if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
       if(cat==="strong"||cat==="medium") return{action:"call"};
+      if(cat==="speculative"&&Math.random()<0.50) return{action:"call"};
+      return{action:"fold"};
+    }
+    if(rel===7){
+      if(!facing){
+        if(cat==="premium"||cat==="strong"||cat==="medium") return{action:"raise",amount:6};
+        if(cat==="speculative") return{action:Math.random()<0.70?"raise":"call",amount:6};
+        if(hiCard(hole)>=8&&Math.random()<0.40) return{action:"raise",amount:6};
+        return{action:"fold"};
+      }
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3.2),myChips)};
+      if(cat==="strong"||cat==="medium") return{action:"call"};
+      if(cat==="speculative"&&Math.random()<0.55) return{action:"call"};
+      return{action:"fold"};
+    }
+    if(rel===0){
+      if(!facing){
+        if(cat==="premium"||cat==="strong"||cat==="medium") return{action:"raise",amount:6};
+        if(cat==="speculative") return{action:"raise",amount:6};
+        if(hiCard(hole)>=7&&Math.random()<0.55) return{action:"raise",amount:6};
+        if(Math.random()<0.30) return{action:"raise",amount:6};
+        return{action:"fold"};
+      }
+      if(cat==="premium") return{action:"raise",amount:Math.min(Math.floor(toCall*3),myChips)};
+      if(cat==="strong"||cat==="medium") return{action:"call"};
+      if(cat==="speculative") return{action:"call"};
       if(isAce(hole)||isSuited(hole)) return{action:"call"};
-      if(Math.random()<0.32) return{action:"call"};
+      if(Math.random()<0.40) return{action:"call"};
       return{action:"fold"};
     }
   }
@@ -308,12 +323,12 @@ function aiDecide(posIdx,prof,hole,community,pot,toCall,myChips,stage,wasPFR){
   const eff=Math.max(0,Math.min(1,str+noise));
   const po=toCall>0?toCall/(pot+toCall):0;
   const wet=boardWetness(community);
-  const isEarly=posIdx<=3;
-  const isLate=posIdx>=6;
+  const isLate=rel<=1||rel===7;
+  const isEarly=rel>=3&&rel<=5;
   const all2=[...hole,...community];
   const sc2={};
   for(const c of all2) sc2[c.suit]=(sc2[c.suit]||0)+1;
-  const hasDraw=Object.values(sc2).some(n=>n===4);
+  const hasDraw=Object.values(sc2).some(function(n){return n===4;});
 
   if(toCall>0){
     if(eff>=0.78){
@@ -322,41 +337,39 @@ function aiDecide(posIdx,prof,hole,community,pot,toCall,myChips,stage,wasPFR){
       }
       return{action:"call"};
     }
-    if(hasDraw&&eff>0.40&&isLate&&Math.random()<prof.bluff*0.7){
+    if(hasDraw&&eff>0.38&&isLate&&Math.random()<prof.bluff*0.7){
       return{action:"raise",amount:Math.min(Math.floor(toCall*2.5),myChips)};
     }
-    const callBuf=isEarly?0.08:isLate?0.01:0.05;
+    const callBuf=isEarly?0.06:isLate?0.00:0.04;
     if(eff>po+callBuf) return{action:"call"};
-    if(prof.style==="Calling Station"&&eff>0.15&&Math.random()<0.65) return{action:"call"};
-    if(posIdx===1&&eff>0.18&&Math.random()<0.50) return{action:"call"};
-    if(eff>po*0.85&&hasDraw&&deep) return{action:"call"};
+    if(prof.style==="Calling Station"&&eff>0.12&&Math.random()<0.70) return{action:"call"};
+    if(rel===2&&eff>0.15&&Math.random()<0.55) return{action:"call"};
+    if(eff>po*0.80&&hasDraw&&deep) return{action:"call"};
     return{action:"fold"};
   }
 
   const frac=betFracForPurpose(eff,community);
-  const betSz=Math.max(2,Math.floor(pot*frac));
-
   if(wasPFR&&community.length===3){
-    const cbFrac=eff>=0.55?(wet>0.6?0.65:0.40):0.33;
+    const cbFrac=eff>=0.50?(wet>0.6?0.65:0.40):0.33;
     const cbSz=Math.max(2,Math.floor(pot*cbFrac));
-    if(eff>=0.40&&Math.random()<prof.cbet) return{action:"bet",amount:Math.min(cbSz,myChips)};
-    if(eff>=0.25&&Math.random()<prof.cbet*0.50) return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.33)),myChips)};
+    if(eff>=0.35&&Math.random()<prof.cbet) return{action:"bet",amount:Math.min(cbSz,myChips)};
+    if(eff>=0.20&&Math.random()<prof.cbet*0.55) return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.33)),myChips)};
   }
-  if(wasPFR&&community.length===4&&eff>=0.45&&Math.random()<prof.cbet*0.70){
-    const bbFrac=wet>0.5?0.70:0.55;
+  if(wasPFR&&community.length===4&&eff>=0.40&&Math.random()<prof.cbet*0.70){
+    const bbFrac=wet>0.5?0.68:0.52;
     return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*bbFrac)),myChips)};
   }
-  if(eff>=0.62){
-    if(isEarly&&eff>=0.82&&Math.random()<0.28) return{action:"check"};
+  if(eff>=0.50){
+    if(isEarly&&eff>=0.80&&Math.random()<0.25) return{action:"check"};
     return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*frac)),myChips)};
   }
-  if(eff>=0.40&&wet>0.5&&Math.random()<prof.aggPost*0.60){
-    return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*(wet>0.6?0.45:0.30))),myChips)};
+  if(eff>=0.30&&wet>0.45&&Math.random()<prof.aggPost*0.65){
+    return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*(wet>0.6?0.45:0.33))),myChips)};
   }
-  if(isLate&&eff>=0.25&&Math.random()<prof.aggPost*0.50){
+  if(isLate&&eff>=0.20&&Math.random()<prof.aggPost*0.55){
     return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.50)),myChips)};
   }
-  if(posIdx>=5&&hasDraw&&Math.random()<prof.aggPost*0.45){
+  if(rel>=6&&hasDraw&&Math.random()<prof.aggPost*0.50){
     return{action:"bet",amount:Math.min(Math.max(2,Math.floor(pot*0.50)),myChips)};
   }
   return{action:"check"};
@@ -511,7 +524,7 @@ function PokerTrainer(){
   const [pfrSet,setPfrSet]=useState(new Set());
   const timerRef=useRef(null);
 
-  function initGame(){
+  function initGame(prevDealerIdx){
     const deck=shuffle(makeDeck());
     let di=0;
     const players=[];
@@ -525,9 +538,14 @@ function PokerTrainer(){
         players.push({id:i,name:p.name,emoji:p.emoji,isUser:false,position:POS_NAMES[i],chips:200,holeCards:[deck[di++],deck[di++]],folded:false,allIn:false,currentBet:0,profile:p});
       }
     }
-    players[0].chips-=1; players[0].currentBet=1;
-    players[1].chips-=2; players[1].currentBet=2;
-    const state={players,deck:deck.slice(di),community:[],pot:3,stage:"preflop",activeIdx:2,dealerIdx:7,sbIdx:0,bbIdx:1,currentBet:2,lastRaiser:1,actionsThisRound:0};
+    // blinds now computed after dealer rotation above
+    const dealerIdx = prevDealerIdx !== undefined ? (prevDealerIdx + 1) % 8 : 7;
+    const sbIdx = (dealerIdx + 1) % 8;
+    const bbIdx = (dealerIdx + 2) % 8;
+    const utgIdx = (dealerIdx + 3) % 8;
+    players[sbIdx].chips -= 1; players[sbIdx].currentBet = 1;
+    players[bbIdx].chips -= 2; players[bbIdx].currentBet = 2;
+    const state={players,deck:deck.slice(di),community:[],pot:3,stage:"preflop",activeIdx:utgIdx,dealerIdx:dealerIdx,sbIdx:sbIdx,bbIdx:bbIdx,currentBet:2,lastRaiser:bbIdx,actionsThisRound:0};
     setGs(state); setPhase("playing");
     setAssessments({}); setRangeOptions({});
     setActionLog(["New hand. Blinds $1/$2."]);
@@ -548,7 +566,7 @@ function PokerTrainer(){
       setThinkingId(null);
       const toCall=gs.currentBet-active.currentBet;
       const wasPFR=pfrSet.has(active.id);
-      const action=aiDecide(active.id,active.profile,active.holeCards,gs.community,gs.pot,toCall,active.chips,gs.stage,wasPFR);
+      const action=aiDecide(active.id,active.profile,active.holeCards,gs.community,gs.pot,toCall,active.chips,gs.stage,wasPFR,gs.dealerIdx);
       applyAction(gs,gs.activeIdx,action);
     },delay);
     return function(){clearTimeout(timerRef.current);};
@@ -888,7 +906,7 @@ function PokerTrainer(){
       </div>
 
       {phase==="results"&&assessResults&&(
-        <ResultsScreen data={assessResults} gs={gs} winner={winner} onNew={initGame}/>
+        <ResultsScreen data={assessResults} gs={gs} winner={winner} onNew={function(){initGame(gs.dealerIdx);}}/>
       )}
     </div>
   );
@@ -942,8 +960,8 @@ function ResultsScreen({data,gs,winner,onNew}){
               </div>
             )}
             <div style={{marginBottom:14}}>
-              <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Showdown</div>
-              {gs.players.filter(function(p){return !p.folded;}).map(function(p){
+              <div style={{color:"#ffd700",fontSize:11,fontWeight:"bold",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>All Hands</div>
+              {gs.players.map(function(p){
                 const ev=p.handEval||(gs.community.length>0?evaluateHand([...p.holeCards,...gs.community]):null);
                 const rangeId=classifyHoleCards(p.holeCards);
                 const rangeDef=HAND_RANGES.find(function(r){return r.id===rangeId;});
