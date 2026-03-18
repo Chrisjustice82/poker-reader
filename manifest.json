@@ -1,0 +1,25 @@
+{
+  "name": "Poker Hand Reader",
+  "short_name": "Poker Reader",
+  "description": "Texas Hold'em hand reading trainer — read your opponents",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#060d18",
+  "theme_color": "#060d18",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

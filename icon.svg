@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#060d18"/>
+  <!-- Spade shape -->
+  <path d="M256 80
+    C256 80 120 180 120 280
+    C120 330 160 360 210 350
+    C195 380 185 400 170 420
+    L342 420
+    C327 400 317 380 302 350
+    C352 360 392 330 392 280
+    C392 180 256 80 256 80Z"
+    fill="#ffd700"/>
+  <!-- Stem base -->
+  <rect x="226" y="400" width="60" height="20" rx="4" fill="#ffd700"/>
+</svg>

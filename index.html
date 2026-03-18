@@ -33,101 +33,15 @@
   ::-webkit-scrollbar-thumb { background: rgba(255,215,0,0.3); border-radius: 2px; }
 </style>
 
+<link rel="manifest" href="./manifest.json">
 <script>
-// ── PWA MANIFEST (injected as blob so it works from any origin including file://) ──
-(function() {
-  const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-    <rect width="512" height="512" rx="80" fill="#060d18"/>
-    <text x="256" y="340" font-size="320" text-anchor="middle" fill="#ffd700">♠</text>
-  </svg>`;
-  const iconUrl = 'data:image/svg+xml,' + encodeURIComponent(icon);
-
-  const manifest = {
-    name: "Poker Hand Reader",
-    short_name: "Poker Reader",
-    description: "Texas Hold'em hand reading trainer — read your opponents",
-    start_url: "./",
-    scope: "./",
-    display: "standalone",
-    orientation: "any",
-    background_color: "#060d18",
-    theme_color: "#060d18",
-    icons: [
-      { src: iconUrl, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }
-    ]
-  };
-
-  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('link');
-  link.rel = 'manifest';
-  link.href = url;
-  document.head.appendChild(link);
-})();
-
-// ── SERVICE WORKER (inline blob) — enables true PWA install + offline ──
-// Chrome requires a SW with a fetch handler to show the "Install app" prompt.
-(function() {
-  if (!('serviceWorker' in navigator)) return;
-
-  const CACHE = 'poker-reader-v1';
-  const URLS = [
-    './',
-    'https://unpkg.com/react@18/umd/react.production.min.js',
-    'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
-    'https://unpkg.com/@babel/standalone/babel.min.js'
-  ];
-
-  const swCode = `
-const CACHE = '${CACHE}';
-const URLS = ${JSON.stringify(URLS)};
-
-// Install: pre-cache all assets
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(cache => {
-      return Promise.allSettled(URLS.map(url => cache.add(url)));
-    }).then(() => self.skipWaiting())
-  );
-});
-
-// Activate: remove old caches
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
-});
-
-// Fetch: cache-first for known assets, network-first for others
-self.addEventListener('fetch', e => {
-  e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(response => {
-        if (response && response.status === 200 && response.type !== 'opaque') {
-          const clone = response.clone();
-          caches.open(CACHE).then(cache => cache.put(e.request, clone));
-        }
-        return response;
-      }).catch(() => cached || new Response('Offline', { status: 503 }));
-    })
-  );
-});
-`;
-
-  const blob = new Blob([swCode], { type: 'application/javascript' });
-  const swUrl = URL.createObjectURL(blob);
-
-  navigator.serviceWorker.register(swUrl, { scope: './' })
-    .then(reg => {
-      console.log('[PWA] Service worker registered, scope:', reg.scope);
-    })
-    .catch(err => {
-      console.warn('[PWA] SW registration failed (expected on file://):', err.message);
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(r => console.log('[PWA] SW registered, scope:', r.scope))
+        .catch(e => console.warn('[PWA] SW failed:', e.message));
     });
-})();
+  }
 </script>
 </head>
 <body>
