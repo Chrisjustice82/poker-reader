@@ -539,7 +539,7 @@ function PokerTrainer(){
       }
     }
     // blinds now computed after dealer rotation above
-    const dealerIdx = prevDealerIdx !== undefined ? (prevDealerIdx + 1) % 8 : 7;
+    const dealerIdx = (typeof prevDealerIdx === 'number') ? (prevDealerIdx + 1) % 8 : 7;
     const sbIdx = (dealerIdx + 1) % 8;
     const bbIdx = (dealerIdx + 2) % 8;
     const utgIdx = (dealerIdx + 3) % 8;
@@ -1067,7 +1067,7 @@ function StartScreen({onStart,pos,setPos}){
             );
           })}
         </div>
-        <button onClick={onStart} style={{width:"100%",background:"linear-gradient(135deg,#185818,#0a3a0a)",color:"#ffd700",border:"2px solid #ffd700",borderRadius:12,padding:15,fontSize:16,fontWeight:"bold",letterSpacing:2,fontFamily:"Georgia,serif",boxShadow:"0 0 24px rgba(255,215,0,0.18)"}}>
+        <button onClick={function(){onStart();}} style={{width:"100%",background:"linear-gradient(135deg,#185818,#0a3a0a)",color:"#ffd700",border:"2px solid #ffd700",borderRadius:12,padding:15,fontSize:16,fontWeight:"bold",letterSpacing:2,fontFamily:"Georgia,serif",boxShadow:"0 0 24px rgba(255,215,0,0.18)"}}>
           DEAL CARDS {"♠"}
         </button>
         <div style={{color:"#2a2a2a",fontSize:9,marginTop:10}}>$1/$2 No-Limit Hold'em {"·"} 8-handed {"·"} $200 stacks</div>
